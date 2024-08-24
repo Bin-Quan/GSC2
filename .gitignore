@@ -1,0 +1,7 @@
+# Editors.
+.vscode
+test_data/
+bin/
+obj/
+
+# Build directory.
