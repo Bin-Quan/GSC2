@@ -36,7 +36,7 @@ CXXFLAGS += $(if $(HAVE_SSE4),-msse4.2,-msse2)
 
 # 链接选项
 LDFLAGS := -L$(LIB_DIR) -Wl,-rpath,$(LIB_DIR)
-LDLIBS := -lm -lpthread -mpopcnt -lz -lbz2 -llzma -lhts -lsdsl -lbsc -lzstd
+LDLIBS := -lm -lpthread -mpopcnt -lz -lbz2 -llzma -lhts -lsdsl -lbsc -lzstd -lmmf
 
 # 源文件、目标文件和可执行文件
 SRCS := $(wildcard $(SRC_DIR)/*.cpp)

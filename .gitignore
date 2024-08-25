@@ -3,5 +3,7 @@
 test_data/
 bin/
 obj/
+toy/
+src/tmp
 
 # Build directory.
