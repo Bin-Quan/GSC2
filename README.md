@@ -112,25 +112,25 @@ The input file format is VCF. You can compress a VCF file in lossless mode using
    
    Use the `--in` option to specify the input VCF file and the `--out` option for the output compressed file.
    ```bash
-   ./gsc compress --in toy/toy.vcf --out toy/toy_lossless.gsc
+   ./bin/gsc compress --in toy/toy.vcf --out toy/toy_lossless.gsc
    ```
 2. **Input file parameter and output redirection**:
    
    Use the `--out` option for the output compressed file and redirect the input VCF file into the command.
    ```bash
-   ./gsc compress --out toy/toy_lossless.gsc < toy/toy.vcf
+   ./bin/gsc compress --out toy/toy_lossless.gsc < toy/toy.vcf
    ```
 3. **Output file redirection and input file parameter**:
    
    Specify the input VCF file with the `--in` option and redirect the output to create the compressed file.
    ```bash
-   ./gsc compress --in toy/toy.vcf > toy/toy_lossless.gsc
+   ./bin/gsc compress --in toy/toy.vcf > toy/toy_lossless.gsc
    ```
 4. **Input and output redirection**:
    
    Use shell redirection for both input and output. This method does not use the `--in` and `--out` options.
    ```bash
-   ./gsc compress < toy/toy.vcf > toy/toy_lossless.gsc
+   ./bin/gsc compress < toy/toy.vcf > toy/toy_lossless.gsc
    ```
 This will create a file:
 * `toy_lossless.gsc` - The compressed archive of the entire VCF file.
@@ -142,13 +142,13 @@ The input file format is VCF. The commands are similar to those used for lossles
    For example, to compress a VCF file in lossy mode:
 
    ```bash
-   ./gsc compress -M --in toy/toy.vcf --out toy/toy_lossy.gsc
+   ./bin/gsc compress -M --in toy/toy.vcf --out toy/toy_lossy.gsc
    ```
    or 
   
    Using redirection:
    ```bash
-   ./gsc compress -M --out toy/toy_lossy.gsc < toy/toy.vcf
+   ./bin/gsc compress -M --out toy/toy_lossy.gsc < toy/toy.vcf
    ``` 
    This will create a file:
    * `toy_lossy.gsc` - The compressed archive of the entire VCF file is implemented with lossy compression. It only retains the 'GT' subfield within the INFO and FORMAT fields, and excludes all other subfields..
@@ -158,35 +158,35 @@ The input file format is VCF. The commands are similar to those used for lossles
 
 To decompress the compressed toy_lossless.gsc into a VCF file named toy_lossless.vcf:
 ```bash
-./gsc decompress --in toy/toy_lossless.gsc --out toy/toy_lossless.vcf
+./bin/gsc decompress --in toy/toy_lossless.gsc --out toy/toy_lossless.vcf
 ```
 #### Lossy decompression:
 
 To decompress the compressed toy_lossy.gsc into a VCF file named toy_lossy.vcf:
 ```bash
-./gsc decompress -M --in toy/toy_lossy.gsc --out toy/toy_lossy.vcf
+./bin/gsc decompress -M --in toy/toy_lossy.gsc --out toy/toy_lossy.vcf
 ```
 ### Query
 #### Variant-based query
 Retrieve entries for chromosome 20 with POS ranging from 1 to 1,000,000, and output to the toy/query_toy_r_20_3_1000000.vcf file.
 
 ```bash
-./gsc decompress -M --range 20:1,1000000 --in toy/toy_lossy.gsc --out toy/query_toy_20_3_1000000.vcf
+./bin/gsc decompress -M --range 20:1,1000000 --in toy/toy_lossy.gsc --out toy/query_toy_20_3_1000000.vcf
 ```
 Retrieve entries for chromosome 20 with POS ranging from 1 to 1,000,000, and output to the terminal interface.
 ```bash
-./gsc decompress -M --range 20:1,1000000 --in toy/toy_lossy.gsc
+./bin/gsc decompress -M --range 20:1,1000000 --in toy/toy_lossy.gsc
 ```
 #### Sample-based query
 Retrieve genotype columns for samples named NA00001 and NA00002, and output to the toy/query_toy_s_NA00001_NA00002.vcf file.
 ```bash
-./gsc decompress -M --samples NA00001,NA00002 --in toy/toy_lossy.gsc --out toy/query_toy_s_NA00001_NA00002.vcf
+./bin/gsc decompress -M --samples NA00001,NA00002 --in toy/toy_lossy.gsc --out toy/query_toy_s_NA00001_NA00002.vcf
 ```
 or
 
 The names NA00001 and NA00002 are stored in the toy/samples_name_file.
 ```bash
-./gsc decompress -M --samples @toy/samples_name_file --in toy/toy_lossy.gsc --out toy/query_toy_s_NA00001_NA00002.vcf
+./bin/gsc decompress -M --samples @toy/samples_name_file --in toy/toy_lossy.gsc --out toy/query_toy_s_NA00001_NA00002.vcf
 ```
 #### Note
 You can also perform mixed queries based on sample names and variants.
