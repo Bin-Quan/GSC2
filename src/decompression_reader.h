@@ -147,7 +147,7 @@ public:
 		delete decomp_part_queue;
     }
 
-	bool OpenReading(const string &in_file_name, const bool &_decompression_mode_type);
+	bool OpenReading(const string &in_file_name, const bool &_decompression_mode_type, const string &out_file_name);
 	bool OpenReadingPart2(const string &in_file_name);
 	void InitDecompressParams();
 	void decompress_meta(vector<string> &v_samples, string &header);

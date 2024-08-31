@@ -35,7 +35,7 @@ void DecompressionReader::out_perm(vector<uint32_t> &perm, vector<variant_desc_t
 }
 
 // *******************************************************************************************************************************
-bool DecompressionReader::OpenReading(const string &in_file_name, const bool &_decompression_mode_type){
+bool DecompressionReader::OpenReading(const string &in_file_name, const bool &_decompression_mode_type, const string &out_file_name){
 	
 	CBSCWrapper::InitLibrary(p_bsc_features);
 	fname = in_file_name;
@@ -76,7 +76,7 @@ bool DecompressionReader::OpenReading(const string &in_file_name, const bool &_d
 	in.read((char *)&other_fields_offset, sizeof(uint64_t));
 	in.read((char *)&sdsl_offset, sizeof(uint64_t));
 	if(mode_type && _decompression_mode_type){
-		temp_file2_fname = fname + ".tmp";
+		temp_file2_fname = out_file_name + ".tmp";  // The directory for temporary file creation was changed from the input directory to the output directory.
 		in.seekg(other_fields_offset, std::ios::beg);
 		std::ofstream out(temp_file2_fname, std::ios::binary | std::ios::trunc);
 		if (!out) {

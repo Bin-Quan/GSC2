@@ -249,7 +249,7 @@ bool Decompressor::decompressProcess()
         decompression_mode_type = true;
     }
     // unique_ptr<CompressedFileLoading> cfile(new CompressedFileLoading());
-    if(!decompression_reader.OpenReading(in_file_name, decompression_mode_type))
+    if(!decompression_reader.OpenReading(in_file_name, decompression_mode_type, out_file_name))
         return false;
     if(decompression_mode_type) {
         if(!decompression_reader.OpenReadingPart2(in_file_name))
