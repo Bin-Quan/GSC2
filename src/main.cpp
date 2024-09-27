@@ -613,6 +613,12 @@ int params_options(int argc, const char *argv[]){
 
                 params.out_AC_AN = true;
             }
+
+            else if (strcmp(argv[i], "--split-blocks") == 0 || strcmp(argv[i], "-B") == 0)
+            {
+                params.subblocking_operation = true;
+                params.num_sub_blocks = atoi(argv[i]);
+            }   // 还未更新Readme和Usage
     
         }
 

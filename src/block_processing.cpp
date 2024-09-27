@@ -19,36 +19,24 @@ void BlockProcess::SetCurBlock(uint64_t _cur_no_vec, uint8_t *cur_data)
 }
 
 void BlockProcess::ProcessSquareBlock(vector<uint32_t> &perm, vector<bool> &zeros, vector<bool> &copies, vector<uint32_t> &origin_of_copy, vector<uint8_t> &samples_indexes,bool permute)
-
 {
-
     if (permute)
-
     {
-
         permute_range_vec(0, cur_no_vec, perm,zeros, copies, origin_of_copy,samples_indexes);
     }
-
     else
-
     {
-
         perm.clear();
-
         perm.resize(params.vec_len * 8, 0);
 
         for (int i = 0; i < (int)params.vec_len * 8; ++i)
-
             perm[i] = i;
     }
 }
 
 
 void BlockProcess::permute_range_vec(uint64_t id_start, uint64_t id_stop, vector<uint32_t> &v_perm,vector<bool> &zeros, vector<bool> &copies, vector<uint32_t> &origin_of_copy, vector<uint8_t> &samples_indexes)
-
 {
-   
-
     size_t n_h_samples = v_perm.size();
 
     // encode_byte_num = (uint32_t)log2(n_h_samples-1)/8+1;
@@ -61,10 +49,7 @@ void BlockProcess::permute_range_vec(uint64_t id_start, uint64_t id_stop, vector
     sparse_matrix_cols.reserve(max_no_vec_in_block*n_h_samples);
 
     no_copy = 0;
-
     no_samples_index = 0;
-
-    
 
     const uint32_t MC_ARRAY_SIZE = (max_no_vec_in_block+63) / 64;          
 
@@ -81,17 +66,14 @@ void BlockProcess::permute_range_vec(uint64_t id_start, uint64_t id_stop, vector
     // empty_vec.fill(0);
 
     empty_vec.resize(MC_ARRAY_SIZE, 0);                        
-
     mc_vectors.resize(n_h_samples, empty_vec);
+
     // new_mc_vectors.resize(n_h_samples, empty_vec);
     vector<int> n_ones(n_h_samples, 0);
-
     vector<int> mc_ids;
 
     for (int i = 0; i < (int)part_vec; ++i)
-
     {
-
         uint32_t id_cur = i + id_start;
 
         auto cur_vec = data + id_cur * params.vec_len;
@@ -99,20 +81,16 @@ void BlockProcess::permute_range_vec(uint64_t id_start, uint64_t id_stop, vector
         bool empty = true;
 
         for (int j = 0; j < (int)params.vec_len; ++j)
-
             if (cur_vec[j])
-
             {
-
                 empty = false;
 
                 break;
             }
-
         if (!empty)
-
             mc_ids.emplace_back(i);
-        else{
+        else
+        {
             zeros[i] = 1;
             // cout<<"zi:"<<i<<endl;
         }
@@ -126,9 +104,7 @@ void BlockProcess::permute_range_vec(uint64_t id_start, uint64_t id_stop, vector
     // cout<<"mc_sort_size:"<<mc_sort_size<<endl;
 
     for (uint32_t i = 0; i < mc_sort_size; ++i)
-
     {
-
         uint32_t id_cur = mc_ids[i] + id_start;
 
         auto cur_vec = data + id_cur * params.vec_len;
@@ -138,13 +114,10 @@ void BlockProcess::permute_range_vec(uint64_t id_start, uint64_t id_stop, vector
         uint32_t arr_pos = i % 64;
 
         for (size_t j = 0; j < n_h_samples; ++j)
-
         {
-
             if (cur_vec[j / 8] & perm_lut8[j % 8])
 
             {
-
                 mc_vectors[j][arr_id] += perm_lut64[arr_pos];
 
                 ++n_ones[j];
@@ -383,7 +356,7 @@ void BlockProcess::permute_range_vec(uint64_t id_start, uint64_t id_stop, vector
                 
                     if(new_mc_vectors[t-1][cur_arr_id]&perm_lut64[cur_arr_pos]){
                         
-                        sparse_matrix_cols.emplace_back(static_cast<uint32_t>(t) - prev_index);
+                        sparse_matrix_cols.emplace_back(static_cast<uint32_t>(t) - prev_index);  // 基因型比特矩阵稀疏编码后得到的列差分信息，以紧凑形式存储"1"的位置。
                         prev_index = static_cast<uint32_t>(t) ;
 
                     }
@@ -580,6 +553,8 @@ void BlockProcess::ProcessLastBlock(vector<bool> &zeros, vector<bool> &copies, v
    
 
 }
+
+// 隐式存储perm数组（细分块处理需更新）
 void BlockProcess::ProcessVariant(vector<uint32_t> &perm, vector<variant_desc_t> &v_vcf_data_io)
 {
 
@@ -610,6 +585,8 @@ inline void BlockProcess::get_perm(vector<uint32_t> perm, int n,vector<variant_d
         // cout << v_vcf_data_compress[j].pos << " " << v_vcf_data_compress[j].ref << endl;
     }
 }
+
+// 合并block块编程chunk块（细分块处理需更新）
 void BlockProcess::addSortFieldBlock(fixed_field_block &_fixed_field_block_io,vector<bool> &_all_zeros,vector<bool> &_all_copies,vector<uint32_t> &_comp_pos_copy,
     
     vector<bool> &_zeros_only, vector<bool> &_copies, vector<uint32_t> &_origin_of_copy,vector<uint8_t> &_samples_indexes,vector<variant_desc_t> &_v_vcf_data_io,int64_t &prev_pos)

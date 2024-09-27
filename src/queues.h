@@ -105,6 +105,7 @@ public:
     explicit GtBlockQueue(size_t _capacity) 
         : flag(false), capacity(_capacity) {}
 
+    // 将一个 genotype_block_t 对象（包含 id_block、data、num_rows 和 v_vcf_data_compress 等数据）推入队列 g_blocks 中
     void Push(int id_block, unsigned char *data, size_t num_rows, std::vector<variant_desc_t> &v_vcf_data_compress)
     {
         std::unique_ptr<genotype_block_t> block(new genotype_block_t(id_block, data, num_rows, std::move(v_vcf_data_compress)));
@@ -112,12 +113,13 @@ public:
         {
             std::unique_lock<std::mutex> lck(m_mutex);
             cv_push.wait(lck, [this] { return g_blocks.size() < capacity; });
-            g_blocks.push_back(std::move(block));
+            g_blocks.push_back(std::move(block));   // 将构造好的 block 插入队列 g_blocks 中
         }
 
         cv_pop.notify_one();
     }
-
+    
+    //Pop 函数用于从队列中取出一个 genotype_block_t 对象，并将其中的各项数据传出。
     bool Pop(int &id_block, unsigned char *&data, size_t &num_rows, std::vector<variant_desc_t> &v_vcf_data_compress)
     {
         std::unique_ptr<genotype_block_t> block;
@@ -130,7 +132,7 @@ public:
                 return false;
 
             block = std::move(g_blocks.front());
-            g_blocks.pop_front();
+            g_blocks.pop_front();  // 取出队首元素，并将其移出队列
         }
 
         cv_push.notify_one();

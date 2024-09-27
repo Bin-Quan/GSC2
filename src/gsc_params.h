@@ -74,6 +74,9 @@ struct GSC_Params
     float min_qual, max_qual; 
     std::string out_id;
 
+    bool subblocking_operation;  //是否需要划分子块
+    uint32_t num_sub_blocks; // Defined sub-blocks number
+
     GSC_Params()
     {
         task_mode = task_mode_t::none;
@@ -113,5 +116,8 @@ struct GSC_Params
         maxAC = INT32_MAX;
         minAF = 0;
         maxAF = 1;
+
+        subblocking_operation = false;
+        num_sub_blocks = 100;  //默认子块数为100
     }
 };

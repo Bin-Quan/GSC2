@@ -390,7 +390,7 @@ bool Compressor::CompressProcess()
     uint32_t no_samples = compression_reader->GetSamples(v_samples);
     // for(int i =0;i<v_samples.size();i++)
     //     std::cerr<<v_samples[i]<<endl;
-    std::cerr << "no_samples:" << no_samples << endl;
+    std::cerr << "The VCF file contains a total of samples: " << no_samples << endl;
 
     if (!no_samples)
     {
@@ -401,18 +401,16 @@ bool Compressor::CompressProcess()
     //compress meta data
     compress_meta(v_samples , header);
 
+    if( no_samples > 50000)
+    {
+        params.subblocking_operation = true;
+        std::cerr << "The number of samples is greater than 50 000, and the samples are divided into groups for compression!\n";
+    }
 
     compression_reader->setNoVecBlock(params);
-
-    std::cerr<<"no_gt_threads:"<<params.no_gt_threads<<endl;
-    GtBlockQueue inGtBlockQueue(max((int)(params.no_blocks*params.no_gt_threads),8));
-
-    // VarBlockQueue<fixed_fixed_field_block> inVarBlockQueue(max((int)params.no_threads * 2, 8));
-    VarBlockQueue<fixed_field_block>  sortVarBlockQueue(max((int)params.no_threads * 2, 8));
-    compression_reader->setQueue(&inGtBlockQueue);
+    std::cerr<<"Number of threads processing the genotype: "<< params.no_gt_threads << endl;
 
     PartQueue<SPackage> part_queue(max((int)params.no_threads * 2, 8)); 
-
     if(params.compress_mode == compress_mode_t::lossless_mode){
 
         compression_reader->setPartQueue(&part_queue); 
@@ -448,14 +446,19 @@ bool Compressor::CompressProcess()
             }));
         }
     }    
+    
+    GtBlockQueue inGtBlockQueue(max((int)(params.no_blocks*params.no_gt_threads),8));
+    VarBlockQueue<fixed_field_block>  sortVarBlockQueue(max((int)params.no_threads * 2, 8));
+    compression_reader->setQueue(&inGtBlockQueue);   // 从这里初始化inGtBlockQueue（push构造）
     block_size = no_samples * params.ploidy * 2;
     
+    // P-C Model下，各个线程都得等待数据推入
     unique_ptr<thread> compress_thread(new thread([&] {
         fixed_field_block fixed_field_block_process;
         while (true)
         {
 
-            if (!sortVarBlockQueue.Pop(fixed_field_block_id,fixed_field_block_process)){
+            if (!sortVarBlockQueue.Pop(fixed_field_block_id,fixed_field_block_process)){   // 在此处被锁住
                 break;
             }
             
@@ -469,6 +472,8 @@ bool Compressor::CompressProcess()
     block_process_thread.reserve(params.no_gt_threads);
     string prev_chrom = "";
     int chunk_id = 0;
+
+    // 此处没有真正利用上多线程，因为在block_process_thread中的线程都在等待数据推入
     for(uint32_t i = 0; i < params.no_gt_threads; ++i)
         block_process_thread.emplace_back(thread([&]() {
             
@@ -599,7 +604,7 @@ bool Compressor::CompressProcess()
         })); 
 
     
-    if (!compression_reader->ProcessInVCF())
+    if (!compression_reader->ProcessInVCF())   // 开始处理，给inGtBlockQueue推入数据
         return false;
 
     no_vec = compression_reader->getNoVec();

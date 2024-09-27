@@ -42,7 +42,7 @@ bool DecompressionReader::OpenReading(const string &in_file_name, const bool &_d
 	if(in_file_name == "-"){
 		std::istream* in_stream = &std::cin;
 
-		fname = in_file_name + ".decom_tmp_gsc";
+		fname = out_file_name + ".decom_tmp_gsc";   // in_file_name -> out_file_name ?
 		{
 			std::ofstream temp_file(fname, std::ios::binary | std::ios::trunc);
 			if (!temp_file) {

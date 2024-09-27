@@ -125,7 +125,7 @@ bool Decompressor::analyzeInputRange(uint32_t & start_chunk_id,uint32_t & end_ch
         
         if (!query_flag)
         {
-            std::cerr << "The specified chromosome wass not found!!!\n";
+            std::cerr << "The specified chromosome was not found!!!\n";
             return 0;
         }
 
