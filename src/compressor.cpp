@@ -366,7 +366,7 @@ bool Compressor::CompressProcess()
     //it is important to initialize the library before using it
     CBSCWrapper::InitLibrary(p_bsc_features);
     
-    MyBarrier  my_barrier(3);
+    // MyBarrier  my_barrier(3);
 
     unique_ptr<CompressionReader> compression_reader(new CompressionReader(params));
 

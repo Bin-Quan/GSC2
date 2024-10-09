@@ -86,14 +86,14 @@ bool CompressionReader::OpenForReading(string &file_name)
             std::cerr << "could not open " << in_file_name << " file" << std::endl;
             return false;
         }
-        hts_set_opt(in_file, HTS_OPT_CACHE_SIZE, 32 << 20);
+        hts_set_opt(in_file, HTS_OPT_CACHE_SIZE, 32 << 20);   // 数据批量读入缓存中，减少频繁的磁盘 I/O 操作
         hts_set_opt(in_file, HTS_OPT_BLOCK_SIZE, 32 << 20);
         if (vcf_hdr)
             bcf_hdr_destroy(vcf_hdr);
         vcf_hdr = bcf_hdr_read(in_file);
         int thread_count = 4;
         hts_set_threads(in_file, thread_count);
-        vcf_record = bcf_init(); 
+        vcf_record = bcf_init();    // 存储从文件中读取的每一条记录
     }
     return true;
 }
@@ -636,8 +636,7 @@ bool CompressionReader::ProcessInVCF()
         if (merge_flag)
             in_file = merge_files[i];
 
-        // 逐条读取记录，效率是否可以提升一下？
-        while (bcf_read1(in_file, vcf_hdr, vcf_record) >= 0)
+        while (bcf_read1(in_file, vcf_hdr, vcf_record) >= 0)  // 从内存中解析数据，不会涉及磁盘 I/O 操作(HTSlib 内部使用了批量读取和缓存机制,在OpenForReading中实现)
         {
             // std::cerr<<"no_samples:"<<no_samples<<endl;
             variant_desc_t desc;
@@ -862,7 +861,7 @@ void CompressionReader::ProcessFixedVariants(bcf1_t *vcf_record, variant_desc_t 
 }
 // ***************************************************************************************************************************************
 // 将固定字段和基因型数据码流添加到对应的缓存中，并分块放入Gt_queue队列中
-// 从这里来操作细分块逻辑
+// 从这里来操作细分块逻辑（按行读取方式不变，推入队列方式采用多线程）
 void CompressionReader::addVariant(int *gt_data, int ngt_data, variant_desc_t &desc)
 {
 
@@ -933,12 +932,13 @@ void CompressionReader::addVariant(int *gt_data, int ngt_data, variant_desc_t &d
         }
         vec_read_in_block += 2; // Two vectors added
 
+        // bv一致循环构造矩阵块，知道达到行数条件
         if (vec_read_in_block == no_vec_in_block) // Insert complete block into queue of blocks
         {
 
             bv.TakeOwnership();
 
-            Gt_queue->Push(block_id, bv.mem_buffer, vec_read_in_block, v_vcf_data_compress);
+            Gt_queue->Push(block_id, bv.mem_buffer, vec_read_in_block, v_vcf_data_compress); 
             v_vcf_data_compress.clear();
             no_chrom_num++;
             no_vec = no_vec + vec_read_in_block;
@@ -1013,11 +1013,10 @@ uint32_t CompressionReader::setNoVecBlock(GSC_Params &params)
 
         int numThreads = std::thread::hardware_concurrency() / 2;
 
-        int numChunks = 1 + (params.var_in_block / 1024);
+        int numChunks = 1 + (params.var_in_block / 1024);   // 取商而忽略小数部分
 
         if (numChunks < numThreads)
         {
-
             numThreads = numChunks;
         }
 
