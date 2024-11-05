@@ -231,12 +231,14 @@ void CompressionReader::InitVarinats(File_Handle_2 *_file_handle2)
     file_handle2 = _file_handle2;
     GetFilterInfoFormatKeys(no_flt_keys, no_info_keys, no_fmt_keys, keys);
     no_keys = no_flt_keys + no_info_keys + no_fmt_keys;
-    v_o_buf.resize(no_keys);
+    v_o_buf.resize(no_keys);    // 根据其他字段的数量初始化缓冲v_o_buf
     for (uint32_t i = 0; i < no_keys; i++)
-        v_o_buf[i].SetMaxSize(max_buffer_size, 0);
+        v_o_buf[i].SetMaxSize(max_buffer_size, 0);  // max_buffer_size = 8M(8 << 20)
     v_buf_ids_size.resize(no_keys, -1);
     v_buf_ids_data.resize(no_keys, -1);
     // std::cerr << "no_keys:" << no_keys << endl;
+    
+    // 构建索引，确认字段标识符与其具体位置之间的映射关系（将key_id映射到数组中的索引值）
     for (uint32_t i = 0; i < no_keys; i++)
     {
         switch (keys[i].keys_type)
@@ -274,6 +276,10 @@ void CompressionReader::InitVarinats(File_Handle_2 *_file_handle2)
     }
 }
 // ***************************************************************************************************************************************
+// 从元信息行中获取Filter/Info/Format字段中子字段的数量和对应的keys表
+// no_flt_keys: Filter包含子字段的数量
+// no_info_keys: Info包含子字段的数量
+// no_fmt_keys: Format包含子字段的数量
 bool CompressionReader::GetFilterInfoFormatKeys(int &no_flt_keys, int &no_info_keys, int &no_fmt_keys, vector<key_desc> &keys)
 {
     if (!vcf_hdr)
@@ -291,7 +297,7 @@ bool CompressionReader::GetFilterInfoFormatKeys(int &no_flt_keys, int &no_info_k
         if (vcf_hdr->hrec[i]->type == BCF_HL_FLT || vcf_hdr->hrec[i]->type == BCF_HL_INFO || vcf_hdr->hrec[i]->type == BCF_HL_FMT)
         {
             // checking if it is a duplicate; if so, curr_dict_id different (and not increased)
-            int id = bcf_hdr_id2int(vcf_hdr, BCF_DT_ID, vcf_hdr->hrec[i]->vals[0]);
+            int id = bcf_hdr_id2int(vcf_hdr, BCF_DT_ID, vcf_hdr->hrec[i]->vals[0]);     // 通过哈希表快速查找给定的id对应的内部整数标识符
 
             new_key.key_id = id;
             if (vcf_hdr->hrec[i]->type == BCF_HL_FLT)
@@ -324,10 +330,24 @@ bool CompressionReader::GetFilterInfoFormatKeys(int &no_flt_keys, int &no_info_k
             keys.emplace_back(new_key);
         }
     }
-    keys.shrink_to_fit();
+    keys.shrink_to_fit();   // 通过释放多余的内存来减少内存占用
     return true;
 }
 // ************************************************************************************
+// 读取每个变体行,并获取其它字段中子字段的数据码流
+// fields:存放每个数据码流,其数据结构如下:
+    // {
+        //存放其它字段中子字段的数据流
+        // present: 是否在元信息行中
+        // data: 实际数据流
+        // data_size ： 数据流大小
+        // typedef struct field_desc_tag {
+        //     bool present = false;  // true if present in description
+        //     char *data = nullptr;
+        //     uint32_t data_size = 0; //current size of allocated memory
+        // ......
+        // }
+    // }
 bool CompressionReader::GetVariantFromRec(bcf1_t *rec, vector<field_desc> &fields)
 {
     vector<int> field_order;
@@ -452,7 +472,7 @@ bool CompressionReader::GetVariantFromRec(bcf1_t *rec, vector<field_desc> &field
                 {
                     int *gt_arr = NULL, ngt_arr = 0;
                     curr_size = bcf_get_genotypes(vcf_hdr, rec, &gt_arr, &ngt_arr);
-                    cur_field.data_size = curr_size - rec->n_sample;
+                    cur_field.data_size = curr_size - rec->n_sample;    // 这样做的目的？
                     cur_field.data = new char[cur_field.data_size];
                     int cur_phased_pos = 0;
                     for (uint32_t j = 0; j < rec->n_sample; ++j)
@@ -522,6 +542,7 @@ bool CompressionReader::GetVariantFromRec(bcf1_t *rec, vector<field_desc> &field
     }
     // if(order.size() < no_keys - no_flt_keys || field_order_flag){
     //     field_order_flag =  false;
+    // 拓扑排序
     for (size_t i = 0; i < field_order.size() - 1; ++i)
     {
         // std::cerr<<field_order[i]<<" ";
@@ -600,7 +621,7 @@ bool CompressionReader::SetVariantOtherFields(vector<field_desc> &fields)
             v_o_buf[i].GetBuffer(v_size, v_data);
 
             SPackage pck(i, v_buf_ids_size[i], v_buf_ids_data[i], part_id, v_size, v_data);
-
+            // cout<< "其他字段数据进入队列：key_id: "<<i<<endl;
             part_queue->Push(pck);
         }
     }
@@ -666,6 +687,7 @@ bool CompressionReader::ProcessInVCF()
 
                 SetVariantOtherFields(curr_field);  // // 将其它字段数据码流fields按不同数据类型编码存放到v_o_buf缓存中
 
+                // 临时数据析构
                 for (size_t j = 0; j < keys.size(); ++j)
                 {
                     if (curr_field[j].data_size > 0)
@@ -862,6 +884,10 @@ void CompressionReader::ProcessFixedVariants(bcf1_t *vcf_record, variant_desc_t 
 // ***************************************************************************************************************************************
 // 将固定字段和基因型数据码流添加到对应的缓存中，并分块放入Gt_queue队列中
 // 从这里来操作细分块逻辑（按行读取方式不变，推入队列方式采用多线程）
+#include <iostream>
+#include <bitset>
+#include <cstdint>
+using namespace std;
 void CompressionReader::addVariant(int *gt_data, int ngt_data, variant_desc_t &desc)
 {
 
@@ -877,7 +903,7 @@ void CompressionReader::addVariant(int *gt_data, int ngt_data, variant_desc_t &d
         kstring_t s = {0, 0, 0};
         kputd(vcf_record->qual, &s);
         //      desc.qual += s.s;
-        desc.qual = s.s;
+        desc.qual = s.s;    // QUAL为什么要存成字符？
         free(s.s);
     }
     if (!vec_read_fixed_fields)
@@ -892,12 +918,18 @@ void CompressionReader::addVariant(int *gt_data, int ngt_data, variant_desc_t &d
     // 编码基因型数据（根据染色体是否发生切换执行不同的逻辑）
     if (desc.chrom == cur_chrom)
     {
+        // for (int i = 0; i < ngt_data; i++)
+        // {
+        //     printf("%d ", gt_data[i]);
+        // }
+        // printf("\n");
+
         // 编码第1位
         for (int i = 0; i < ngt_data; i++)
         {
             if (gt_data[i] == 0 || gt_data[i] == 1)
             {
-                bv.PutBit(0);
+                bv.PutBit(0);   // PutBit 函数逐位将数据放入一个缓冲区 word_buffer，一旦缓冲区填满，它会调用 PutWord 来处理完整的 32 位数据。PutWord 函数负责将 32 位的数据拆分为 4 个字节，并逐个字节写出。
             }
             else // if(bcf_gt_is_missing(gt_arr[i]) || bcf_gt_allele(gt_arr[i]) == 2)
             {
@@ -905,7 +937,7 @@ void CompressionReader::addVariant(int *gt_data, int ngt_data, variant_desc_t &d
             }
         }
 
-        bv.FlushPartialWordBuffer();
+        bv.FlushPartialWordBuffer();    // 将部分填充的 word_buffer 进行对齐，并将其中的字节按需输出
 
         // Set vector with less significant bits of dibits
         for (int i = 0; i < ngt_data; i++)
@@ -932,11 +964,16 @@ void CompressionReader::addVariant(int *gt_data, int ngt_data, variant_desc_t &d
         }
         vec_read_in_block += 2; // Two vectors added
 
-        // bv一致循环构造矩阵块，知道达到行数条件
+        // bv一致循环构造矩阵块，直到达到行数条件
         if (vec_read_in_block == no_vec_in_block) // Insert complete block into queue of blocks
         {
 
             bv.TakeOwnership();
+
+            // cout<< "=======达到块数条件=========\n";
+            // for (size_t i = 0; i < 40; ++i) {
+            //     std::cout << "bv.mem_buffer[" << i << "] (in binary) = " << std::bitset<8>(bv.mem_buffer[i]) << std::endl;
+            // }
 
             Gt_queue->Push(block_id, bv.mem_buffer, vec_read_in_block, v_vcf_data_compress); 
             v_vcf_data_compress.clear();
@@ -1045,8 +1082,8 @@ uint32_t CompressionReader::setNoVecBlock(GSC_Params &params)
 
         if (params.task_mode == task_mode_t::mcompress)
         {
-            no_vec_in_block = params.var_in_block * 2;
-            params.vec_len = params.var_in_block / 8 + ((params.var_in_block % 8) ? 1 : 0);
+            no_vec_in_block = params.var_in_block * 2;      // 单个向量（全零 or 复制）
+            params.vec_len = params.var_in_block / 8 + ((params.var_in_block % 8) ? 1 : 0);  // 矩阵每行占用的字节数
             params.n_samples = no_samples;
         }
     return 0;
@@ -1062,7 +1099,12 @@ void CompressionReader::CloseFiles()
     }
     if (vec_read_in_block)
     {
+
         bv.TakeOwnership();
+        // cout<< "=======关闭文件=========\n";
+        // for (size_t i = 0; i < 12; ++i) {                
+        //     std::cout << "bv.mem_buffer[" << i << "] (in binary) = " << std::bitset<8>(bv.mem_buffer[i]) << std::endl;
+        // }
         // Gt_queue->Push(block_id, bv.mem_buffer, vec_read_in_block,v_vcf_data_compress,chrom_flag::none);
         Gt_queue->Push(block_id, bv.mem_buffer, vec_read_in_block, v_vcf_data_compress);
         // v_vcf_data_compress.clear();

@@ -85,7 +85,7 @@ bool DecompressionReader::OpenReading(const string &in_file_name, const bool &_d
 		}
 		const std::streamsize bufferSize = 1024 * 1024;
 		char buffer[bufferSize];
-    	std::streamsize bytesToRead = sdsl_offset - other_fields_offset;
+    	std::streamsize bytesToRead = sdsl_offset - other_fields_offset;	// 从偏移 other_fields_offset 开始读取，直到 sdsl_offset
 
 
 
@@ -121,7 +121,7 @@ bool DecompressionReader::OpenReading(const string &in_file_name, const bool &_d
     }
 
     // rest of archive
-    buf_pos = 0;
+    buf_pos = 0;	// 用于跟踪当前在缓冲区中的读取位置
     
 #ifndef MMAP
     {
@@ -156,7 +156,7 @@ bool DecompressionReader::OpenReading(const string &in_file_name, const bool &_d
         cerr << "No file: " << fname << endl;
         exit(1);
     }
-    buf = (uint8_t *)fm->data() + FileStartPosition;
+    buf = (uint8_t *)fm->data() + FileStartPosition;	// 获取映射区域的起始地址，并偏移到指定的 FileStartPosition
     // arch_size = other_fields_offset - FileStartPosition;
 
 #endif

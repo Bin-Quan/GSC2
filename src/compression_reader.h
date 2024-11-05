@@ -33,6 +33,7 @@ class CompressionReader {
     bool merge_failure_flag;
 
     uint32_t no_samples;
+    uint32_t samples_per_block;
     uint32_t ploidy;
     uint64_t vec_len;   
     uint64_t no_vec;
@@ -41,6 +42,11 @@ class CompressionReader {
     int *cur_g_data = nullptr;
     int ncur_g_data;
     int *gt_data = nullptr;
+
+    // 作为局部变量，降低声明周期
+    // std::vector<int> gt_data;
+    // std::vector<std::vector<int>> gt_data_block;  // 丢弃gt_data指针，存储临时GT块
+    int current_block_rows;
     int temp;
     int64_t cur_pos;
     int32_t tmpi;
@@ -69,7 +75,7 @@ class CompressionReader {
     int no_flt_keys, no_info_keys, no_fmt_keys;
     uint32_t no_keys;
     vector<key_desc> keys;
-    int key_gt_id;
+    int key_gt_id;  // 基因型字段的id
     uint32_t no_actual_variants;
     vector<uint32_t> actual_variants;
     vector<uint32_t> v_size;
@@ -78,7 +84,7 @@ class CompressionReader {
     vector<int> v_buf_ids_size;
 	vector<int> v_buf_ids_data;
     File_Handle_2 * file_handle2 = nullptr;
-    PartQueue<SPackage> * part_queue = nullptr;
+    PartQueue<SPackage> * part_queue = nullptr;     // 用于存储其他字段的队列
     unordered_map<int, unordered_set<int>> field_order_graph;
     bool field_order_flag;
     // unordered_map<int, unordered_set<int>> graph;
@@ -100,7 +106,7 @@ class CompressionReader {
     #endif
     bool ReadFile();
     bool setBitVector();
-	void addVariant(int * gt_data, int ngt_data,variant_desc_t &desc);
+	void addVariant(int *gt_data, int ngt_data,variant_desc_t &desc);
     bool GetVariantFromRec(bcf1_t* rec, vector<field_desc>& fields);
     bool GetFilterInfoFormatKeys(int &no_flt_keys, int &no_info_keys, int &no_fmt_keys, vector<key_desc> &keys);
     void ProcessFixedVariants(bcf1_t *vcf_record, variant_desc_t &desc);

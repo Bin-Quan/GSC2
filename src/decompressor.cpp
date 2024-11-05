@@ -988,6 +988,7 @@ bool Decompressor::SetVariant(variant_desc_t &desc, vector<uint8_t> &_my_str, si
     return true;
 }
 //*****************************************************************************************************************
+// 将文件解压成PLINK工具的二进制bed格式
 int Decompressor::BedFormatDecompress(){
 
     done_unique.clear();
@@ -1543,6 +1544,7 @@ int Decompressor::decompressSampleSmart(const string &range)
 
     size_t c_out_line;
 
+    // 检索样本还有个阈值
     if (smpl.no_samples > NO_SAMPLE_THRESHOLD) // || range != "")
     {
         return decompressRangeSample(range);

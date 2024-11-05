@@ -797,6 +797,7 @@ public:
    
 };
 
+// 用于在多线程环境下存储和访问 PartType 类型的元素
 template<typename PartType>
 class PartQueue
 {  
@@ -882,10 +883,10 @@ public:
 
 private:
 
-    list<PartType> part_queue;
+    list<PartType> part_queue;  // 双向链表
     queue<PartType> q;
     bool flag;
-    size_t capacity;
+    size_t capacity;    // 队列容量
     
     mutex m_mutex;
     condition_variable cv_pop, cv_push;

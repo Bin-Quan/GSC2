@@ -76,6 +76,11 @@ typedef struct block_tag
 enum  class key_type_t {flt, info, fmt};  // FILTER / INFO / FORMAT
 
 // ************************************************************************************
+    //其它字段（FILTER / INFO / FORMAT）的子字段信息
+    //key_id: 使用htslib从元信息行中读取的子字段id
+    //actual_field_id: 使用htslib从变体行中读取的实际子字段id
+    // keys_type: 子字段所属的其它字段类型 
+    // type: 数据类型
 typedef struct key_desc_tag {
     uint32_t key_id;
     uint32_t actual_field_id;
@@ -110,7 +115,8 @@ typedef struct field_desc_tag {
 
     }
   
-    field_desc_tag(field_desc_tag&& other) noexcept
+    // 移动构造函数和移动赋值运算符：通过移动资源而不是复制
+    field_desc_tag(field_desc_tag&& other) noexcept     // 避免不必要的深度拷贝，提高性能
     {
         // cout<<"Move"<<endl;
         present = other.present;
@@ -298,15 +304,17 @@ struct fixed_field_block {
 
 
 };
+
+// 打包和传输数据包
 struct SPackage {
 
-	int key_id;
-	uint32_t stream_id_size;
-	uint32_t stream_id_data;
-	int part_id;
+	int key_id;     // 数据包的唯一标识
+	uint32_t stream_id_size;    // 流的大小标识符，用于描述数据流的长度
+	uint32_t stream_id_data;    // 存储实际的流 ID 数据 ？？
+	int part_id;    // 分片或部分数据包的标识符 ？？？
 	vector<uint32_t> v_size;
 	vector<uint8_t> v_data;
-	int stream_id_src;
+	int stream_id_src;  // 用于标记数据流的源头
 	bool is_func;
 	SPackage()
 	{

@@ -68,6 +68,7 @@ bool Compressor::writeCompressFlie()
     fwrite(&comp_size, sizeof(uint32_t), 1, comp);
     fwrite(comp_v_samples.data(), 1, comp_v_samples.size(), comp);
     
+    // 从temp_file中逐块读取数据，并写入到comp文件（想象快递搬运的过程）
     uint64_t size;
     uint8_t *temp_buffer = NULL;
     while (fread(&size, sizeof(size), 1, temp_file) == 1) { 
@@ -182,6 +183,7 @@ bool Compressor::writeCompressFlie()
     fwrite(&sdsl_offset, sizeof(sdsl_offset), 1, comp);
     std::cerr<<int(mode_type) <<" " << other_fields_offset <<" " << sdsl_offset <<endl;
     fseek(comp, 21, SEEK_SET);
+    // 这里是否重复写入了？
     for(auto cur_chunk:chunks_streams)
     {
         fwrite(&cur_chunk.second.cur_chunk_actual_pos, sizeof(uint32_t), 1, comp);
@@ -299,17 +301,17 @@ bool Compressor::OpenForWriting(const string &out_file_name)
         exit(1);
     }
 
-
+    // 二进制格式处理
     mode_type = false;
 
-    fwrite(&mode_type, sizeof(mode_type), 1, comp);
+    fwrite(&mode_type, sizeof(mode_type), 1, comp);   // 写入压缩模式
     
     other_fields_offset = ftell(comp) + sizeof(uint64_t);
-    fwrite(&other_fields_offset, sizeof(other_fields_offset), 1, comp);
+    fwrite(&other_fields_offset, sizeof(other_fields_offset), 1, comp);   // 记录其他字段在文件中的偏移量
 
     sdsl_offset = ftell(comp) + sizeof(uint64_t);
     
-    if (fwrite(&sdsl_offset, sizeof(sdsl_offset), 1, comp) != 1) {
+    if (fwrite(&sdsl_offset, sizeof(sdsl_offset), 1, comp) != 1) {      // 记录全零和复制向量的存储位置
         std::cerr << "ERROR: Write operation failed for: `" << fname << "`" << std::endl;
     }
 
@@ -320,7 +322,9 @@ bool Compressor::OpenForWriting(const string &out_file_name)
     // fwrite(&sdsl_offset, sizeof(sdsl_offset), 1, comp);
 
     int id = (int) chunks_streams.size();
-                                                
+
+    // 向一个map容器中添加chunk_stream结构体
+    // 管理或追踪数据块在流或文件中的位置及其偏移量                                           
 	chunks_streams[id] = chunk_stream(0,0);
 
     
@@ -329,7 +333,7 @@ bool Compressor::OpenForWriting(const string &out_file_name)
 //*******************************************************************************************************************
 bool Compressor::OpenTempFile(const string &out_file_name)
 {
-    temp_file1_fname = (char *)malloc(strlen(out_file_name.c_str()) + 5);
+    temp_file1_fname = (char *)malloc(strlen(out_file_name.c_str()) + 5);   // 为存储临时文件名 temp_file1_fname 分配足够的内存空间
 
     snprintf(temp_file1_fname, strlen(out_file_name.c_str()) + 5, "%s.temp", out_file_name.c_str());
 
@@ -341,15 +345,15 @@ bool Compressor::OpenTempFile(const string &out_file_name)
         exit(1);
     }
     
-    setvbuf(temp_file, nullptr, _IOFBF, 64 << 20);
+    setvbuf(temp_file, nullptr, _IOFBF, 64 << 20);  // 设置文件的缓冲模式和缓冲区大小：设置一个大小为 64MB 的全缓冲区，以优化文件写入性能
 
 
     if(params.compress_mode == compress_mode_t::lossless_mode){
         if (file_handle2)
 		    delete file_handle2;
-	    file_handle2 = new File_Handle_2(false);
+	    file_handle2 = new File_Handle_2(false);    // 将指针存储在 file_handle2 对象中
 
-        temp_file2_fname = out_file_name + ".com_tmp_gsc";
+        temp_file2_fname = out_file_name + ".com_tmp_gsc";  // 第二个临时文件，为第二个File存储临时信息
 
         if (!file_handle2->Open(temp_file2_fname))
 	    {
@@ -359,6 +363,12 @@ bool Compressor::OpenTempFile(const string &out_file_name)
     }
     return true;
 }
+
+#include <iostream>
+#include <bitset>
+#include <cstdint>
+using namespace std;
+
 // *******************************************************************************************************************
 //compess pragma entry
 bool Compressor::CompressProcess()
@@ -368,7 +378,7 @@ bool Compressor::CompressProcess()
     
     // MyBarrier  my_barrier(3);
 
-    unique_ptr<CompressionReader> compression_reader(new CompressionReader(params));
+    unique_ptr<CompressionReader> compression_reader(new CompressionReader(params));  // 智能指针
 
     if (!compression_reader->OpenForReading(params.in_file_name))
 	{
@@ -387,7 +397,7 @@ bool Compressor::CompressProcess()
 
     compression_reader->GetHeader(header);
     
-    uint32_t no_samples = compression_reader->GetSamples(v_samples);
+    uint32_t no_samples = compression_reader->GetSamples(v_samples);   // 获取样本编号和样本数
     // for(int i =0;i<v_samples.size();i++)
     //     std::cerr<<v_samples[i]<<endl;
     std::cerr << "The VCF file contains a total of samples: " << no_samples << endl;
@@ -438,6 +448,7 @@ bool Compressor::CompressProcess()
                     
 			        if (!part_queue.Pop<SPackage>(pck, fo))
 				        break;
+                    cout<< "数据弹出：pck_id: "<<pck.key_id<<endl;
                     compress_other_fileds(pck, v_compressed, v_tmp);
                 
 		        }      
@@ -473,7 +484,6 @@ bool Compressor::CompressProcess()
     string prev_chrom = "";
     int chunk_id = 0;
 
-    // 此处没有真正利用上多线程，因为在block_process_thread中的线程都在等待数据推入
     for(uint32_t i = 0; i < params.no_gt_threads; ++i)
         block_process_thread.emplace_back(thread([&]() {
             
@@ -496,7 +506,10 @@ bool Compressor::CompressProcess()
                 if (!inGtBlockQueue.Pop(block_id, data, num_rows, v_vcf_data_io)){
                     break;
                 }
-
+                cout<< "数据弹出：block_id: "<<block_id<<endl;
+                // for (size_t i = 0; i < 40; ++i) {
+                //     std::cout << "data[" << i << "] (in binary) = " << std::bitset<8>(data[i]) << std::endl;
+                // }
                 vector<bool> zeros_only(num_rows, false);
                 vector<bool> copies(num_rows, false);                           
                 block_process.SetCurBlock(num_rows, data);
@@ -621,7 +634,7 @@ bool Compressor::CompressProcess()
         auto stream_id = file_handle2->RegisterStream("part2_params");
         vector<uint8_t> v_desc;
         vector<uint32_t> actual_variants = compression_reader->GetActualVariants();
-        compression_reader->UpdateKeys(keys);
+        compression_reader->UpdateKeys(keys);  // 作用何在？
         append(v_desc, static_cast<uint32_t>(actual_variants.size()));
         
         for (uint32_t i = 0; i < actual_variants.size(); ++i)
@@ -780,7 +793,7 @@ bool Compressor::check_coder_compressor(SPackage& pck)
 	unique_lock<mutex> lck(mtx_v_coder);
 	int sid = pck.key_id;
 
-	
+	// 检查 pck 的 part_id 是否与 v_coder_part_ids 中与 pck.key_id 对应的元素相同
 	return (int) v_coder_part_ids[sid] == pck.part_id;
 }
 
@@ -999,7 +1012,7 @@ bool Compressor::compress_meta(vector<string> v_samples,const string& v_header)
 //******************************************************************************************************************************************
 void Compressor::InitCompressParams(){
     
-    v_coder_part_ids.resize(no_keys, 0);
+    v_coder_part_ids.resize(no_keys, 0);    // 子字段数据流编码id
     v_bsc_data.resize(no_keys);
     v_bsc_size.resize(no_keys);
    

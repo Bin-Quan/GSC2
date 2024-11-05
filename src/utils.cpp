@@ -50,6 +50,7 @@ long int strtol(const char* str, char** endptr, int base) noexcept
 }
 #endif
 // ************************************************************************************
+// 将字符串x转换为字节追加到v_comp向量中，并在末尾添加一个空字符（'\0'）
 void append_str(vector<uint8_t>& v_comp, const string& x) {
     size_t old_size = v_comp.size();
     size_t new_size = old_size + x.size() + 1;

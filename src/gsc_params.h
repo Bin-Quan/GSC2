@@ -75,7 +75,7 @@ struct GSC_Params
     std::string out_id;
 
     bool subblocking_operation;  //是否需要划分子块
-    uint32_t num_sub_blocks; // Defined sub-blocks number
+    uint32_t samples_per_block; // 定义块大小
 
     GSC_Params()
     {
@@ -117,7 +117,7 @@ struct GSC_Params
         minAF = 0;
         maxAF = 1;
 
-        subblocking_operation = false;
-        num_sub_blocks = 100;  //默认子块数为100
+        subblocking_operation = true;
+        samples_per_block = 500;  //默认块大小2000，末端数据块大小不确定
     }
 };

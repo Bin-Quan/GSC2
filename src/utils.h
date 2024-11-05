@@ -28,8 +28,8 @@ long int strtol(const char* str, char** endptr, int base) noexcept;
 #endif
 #endif
 struct chunk_stream {
-    uint32_t cur_chunk_actual_pos;
-    size_t offset;
+    uint32_t cur_chunk_actual_pos;   // 表示当前块的实际位置，用于跟踪某个流中的位置
+    size_t offset;  // 表示偏移量，与流数据的块相关联
     chunk_stream() : cur_chunk_actual_pos(0), offset(0)
 	{};
 	chunk_stream(int64_t _cur_chunk_actual_pos, size_t _offset) : cur_chunk_actual_pos(_cur_chunk_actual_pos), offset(_offset)
