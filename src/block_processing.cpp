@@ -20,16 +20,20 @@ void BlockProcess::SetCurBlock(uint64_t _cur_no_vec, uint8_t *cur_data)
 
 void BlockProcess::ProcessSquareBlock(vector<uint32_t> &perm, vector<bool> &zeros, vector<bool> &copies, vector<uint32_t> &origin_of_copy, vector<uint8_t> &samples_indexes,bool permute)
 {
+    uint64_t vec_len = params.vec_len;
+    if(perm.size() == params.no_samples_last_block * params.ploidy)
+        vec_len = params.last_vec_len;
+
     if (permute)
     {
-        permute_range_vec(0, cur_no_vec, perm,zeros, copies, origin_of_copy,samples_indexes);
+        permute_range_vec(0, cur_no_vec, perm, zeros, copies, origin_of_copy, samples_indexes);
     }
     else
     {
         perm.clear();
-        perm.resize(params.vec_len * 8, 0);
+        perm.resize(vec_len * 8, 0);
 
-        for (int i = 0; i < (int)params.vec_len * 8; ++i)
+        for (int i = 0; i < (int)vec_len * 8; ++i)
             perm[i] = i;
     }
 }
@@ -48,8 +52,9 @@ void BlockProcess::permute_range_vec(uint64_t id_start, uint64_t id_stop, vector
     size_t n_h_samples = v_perm.size();
 
     // encode_byte_num = (uint32_t)log2(n_h_samples-1)/8+1;
-    size_t max_no_vec_in_block = n_h_samples*2;
-    
+    // size_t max_no_vec_in_block = n_h_samples*2;
+    size_t max_no_vec_in_block = params.n_samples * params.ploidy * 2;
+
     uint32_t* comp_pos_copy = new uint32_t[max_no_vec_in_block];
 
     // uint8_t* comp_samples_indexes = new uint8_t[max_no_vec_in_block*max_no_vec_in_block];
@@ -59,11 +64,12 @@ void BlockProcess::permute_range_vec(uint64_t id_start, uint64_t id_stop, vector
     no_copy = 0;
     no_samples_index = 0;
 
-    const uint32_t MC_ARRAY_SIZE = (max_no_vec_in_block+63) / 64;          
+    const uint32_t MC_ARRAY_SIZE = (max_no_vec_in_block+63) / 64;       // 在并行计算或多核处理时，为了提高性能，通常需要对数据进行对齐，尤其是对64位的操作     
 
     uint64_t part_vec = id_stop - id_start;
 
-    vector<mc_vec_t> mc_vectors;
+    // Identifying Non-Empty Rows and Initializing Vectors
+    vector<mc_vec_t> mc_vectors;    
     // vector<mc_vec_t> new_mc_vectors;
     // mt19937 mt;
 
@@ -80,15 +86,18 @@ void BlockProcess::permute_range_vec(uint64_t id_start, uint64_t id_stop, vector
     vector<int> n_ones(n_h_samples, 0);
     vector<int> mc_ids;
 
+    uint64_t vec_len = params.vec_len;
+    if(n_h_samples == params.no_samples_last_block * params.ploidy)
+        vec_len = params.last_vec_len;
     for (int i = 0; i < (int)part_vec; ++i)
     {
         uint32_t id_cur = i + id_start;
 
-        auto cur_vec = data + id_cur * params.vec_len;
+        auto cur_vec = data + id_cur * vec_len;
 
         bool empty = true;
 
-        for (int j = 0; j < (int)params.vec_len; ++j)
+        for (int j = 0; j < (int)vec_len; ++j)
             if (cur_vec[j])
             {
                 empty = false;
@@ -96,7 +105,7 @@ void BlockProcess::permute_range_vec(uint64_t id_start, uint64_t id_stop, vector
                 break;
             }
         if (!empty)
-            mc_ids.emplace_back(i);
+            mc_ids.emplace_back(i);         // 非零行的索引存入mc_ids
         else
         {
             zeros[i] = 1;
@@ -115,12 +124,13 @@ void BlockProcess::permute_range_vec(uint64_t id_start, uint64_t id_stop, vector
     {
         uint32_t id_cur = mc_ids[i] + id_start;
 
-        auto cur_vec = data + id_cur * params.vec_len;
+        auto cur_vec = data + id_cur * vec_len;
 
+        // 计算行在稀疏矩阵中的位置，稀疏矩阵（mc_vectors）将以64行为一个分组进行存储和更新
         uint32_t arr_id = i / 64;
-
         uint32_t arr_pos = i % 64;
 
+        // 利用查找表（perm_lut8和perm_lut64）快速更新稀疏矩阵（mc_vectors）和非零元素统计（每一列1的个数：n_ones），逐位检查当前行向量中的每一列
         for (size_t j = 0; j < n_h_samples; ++j)
         {
             if (cur_vec[j / 8] & perm_lut8[j % 8])
@@ -141,7 +151,7 @@ void BlockProcess::permute_range_vec(uint64_t id_start, uint64_t id_stop, vector
 
     
 
-    list<pair<int, int>> density_list;
+    list<pair<int, int>> density_list;      // density_list：包含样本索引及其对应的1的数量
 
     density_list.emplace_back(make_pair(0, n_ones[0]));
     perm.emplace_back(0);
@@ -214,6 +224,7 @@ void BlockProcess::permute_range_vec(uint64_t id_start, uint64_t id_stop, vector
 
         uint64_t dif_down = abs(p->second - p_down->second);
 
+        // 用bit_cost来衡量样本之间的相似性
         while (true)
         {
             uint64_t min_dif = min(dif_up, dif_down);
@@ -296,61 +307,49 @@ void BlockProcess::permute_range_vec(uint64_t id_start, uint64_t id_stop, vector
 
     v_perm.resize(n_h_samples, 0);
 
-    for (size_t i = 0; i < n_h_samples; ++i)
-    {
-        // v_perm[perm[i]] = i;
-        v_perm[i] = perm[i];
+    // for (size_t i = 0; i < n_h_samples; ++i)
+    // {
+    //     // v_perm[perm[i]] = i;
+    //     v_perm[i] = perm[i];
 
-    }
+    // }
+    v_perm = std::move(perm);
+    v_perm.pop_back();
     perm.shrink_to_fit();
 
-    uint8_t *old_vec = new uint8_t[params.vec_len];
-
+    uint8_t *old_vec = new uint8_t[vec_len];
     size_t mc_tr=0;
-
     map<int,int> f_copy;
 
     for (int i = 0; i < (int)part_vec; ++i)
-
     {
-        
-
         bool empty = true;
-
         auto cur_arr_id = (i-mc_tr)/64;
-
-        auto cur_arr_pos = (i-mc_tr)%64; 
-
+        auto cur_arr_pos = (i-mc_tr)%64;
         uint32_t id_cur = i + id_start;
+        auto new_vec = data + id_cur * vec_len;
+        memcpy(old_vec, new_vec, vec_len);
+        fill_n(new_vec, vec_len, 0);
 
-        auto new_vec = data + id_cur * params.vec_len;
-
-        memcpy(old_vec, new_vec, params.vec_len);
-
-        fill_n(new_vec, params.vec_len, 0);
-
-        for (int j = 0; j < (int)params.vec_len; ++j){
-
+        for (int j = 0; j < (int)vec_len; ++j){
             if (old_vec[j])
-
             {
                 empty = false;
-
                 break;
             }
         }
-
+        
         if(empty){
             mc_tr++;
             continue;
         }
         else {
             if(!copies[i]){
-                for(size_t next_copy = i+1 ; next_copy < part_vec && next_copy < i+params.max_replication_depth;next_copy++){
+                for(size_t next_copy = i+1 ; next_copy < part_vec && next_copy < i+params.max_replication_depth;next_copy++){       // 指定深度内查找重复行
 
-                    auto next_vec = data+ next_copy * params.vec_len;
+                    auto next_vec = data+ next_copy * vec_len;
 
-                    if(memcmp(old_vec,next_vec,params.vec_len) == 0)
+                    if(memcmp(old_vec,next_vec,vec_len) == 0)
                     {
                         copies[next_copy] = 1;
                         f_copy.emplace(next_copy,i);
@@ -369,7 +368,7 @@ void BlockProcess::permute_range_vec(uint64_t id_start, uint64_t id_stop, vector
 
                     }
                 }
-                sparse_matrix_cols.emplace_back(0);
+                sparse_matrix_cols.emplace_back(0);     // 以0结尾，表示该行结束
   
                 // uint8_t first_prev_index = 0;
                 // uint8_t second_prev_index =0;
@@ -613,19 +612,24 @@ void BlockProcess::addSortFieldBlock(fixed_field_block &_fixed_field_block_io,ve
     _fixed_field_block_io.gt_block.insert(_fixed_field_block_io.gt_block.end(), _samples_indexes.begin(), _samples_indexes.end());
     // start += _zeros_only.size();
     // cout<<"_zeros_only.size():"<<_zeros_only.size()<<":"<<start<<endl;
-    _fixed_field_block_io.no_variants += _v_vcf_data_io.size();
-    variant_desc_t desc;
-    for (size_t i = 0; i < _v_vcf_data_io.size(); ++i)
+
+    if (_v_vcf_data_io[0].pos != 0)
     {
-        desc = _v_vcf_data_io[i];
-        append_str(_fixed_field_block_io.chrom,desc.chrom);
-        append_str(_fixed_field_block_io.id,desc.id);
-        append_str(_fixed_field_block_io.alt,desc.alt);
-        append_str(_fixed_field_block_io.qual,desc.qual);
-        append(_fixed_field_block_io.pos, (int64_t)(desc.pos - prev_pos));
-	    prev_pos = desc.pos;
-	    append_str(_fixed_field_block_io.ref, desc.ref);
+        _fixed_field_block_io.no_variants += _v_vcf_data_io.size();
+        variant_desc_t desc;
+        for (size_t i = 0; i < _v_vcf_data_io.size(); ++i)
+        {
+            desc = _v_vcf_data_io[i];
+            append_str(_fixed_field_block_io.chrom,desc.chrom);
+            append_str(_fixed_field_block_io.id,desc.id);
+            append_str(_fixed_field_block_io.alt,desc.alt);
+            append_str(_fixed_field_block_io.qual,desc.qual);
+            append(_fixed_field_block_io.pos, (int64_t)(desc.pos - prev_pos));
+            prev_pos = desc.pos;
+            append_str(_fixed_field_block_io.ref, desc.ref);
+        }
     }
+
 }
 // void BlockProcess::addSortFieldBlock(sort_field_block &sort_fixed_field_block_io,vector<bool> &_all_zeros,vector<bool> &_all_copies,vector<uint32_t> &_comp_pos_copy,
 //     vector<bool> &_zeros_only, vector<bool> &_copies, vector<uint32_t> &_origin_of_copy,vector<uint8_t> &_samples_indexes,FieldsPackage &fields_pck,int64_t &prev_pos){

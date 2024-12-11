@@ -120,7 +120,7 @@ public:
     }
     
     //Pop 函数用于从队列中取出一个 genotype_block_t 对象，并将其中的各项数据传出。
-    bool Pop(int &id_block, unsigned char *&data, size_t &num_rows, std::vector<variant_desc_t> &v_vcf_data_compress)
+    bool Pop(uint32_t &id_block, unsigned char *&data, size_t &num_rows, std::vector<variant_desc_t> &v_vcf_data_compress)
     {
         std::unique_ptr<genotype_block_t> block;
 

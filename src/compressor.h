@@ -14,6 +14,7 @@
 #include <tuple>
 #include "bsc.h"
 #include "zstd_compress.h"
+#include "LoggerUtil.h"
 // #include <filesystem>
 using namespace std;
 
@@ -79,7 +80,7 @@ class Compressor
     size_t block_size;
     mutex mtx_gt_block;
 	condition_variable cv_gt_block;
-    int cur_block_id = 0;
+    uint32_t cur_block_id = 0;
 
 
 
@@ -110,21 +111,23 @@ class Compressor
     int key_gt_id;
 
     
-
+    uint32_t no_samples_per_block;
+    uint32_t no_samples_last_block;
     
 
     bool OpenForWriting(const string &out_file_name);
     char bits_used(unsigned int n);
-    void compressReplicatedRow();;
+    void compressReplicatedRow();
     bool writeCompressFlie();
 
     void compress_other_fileds(SPackage& pck, vector<uint8_t>& v_compressed, vector<uint8_t>& v_tmp);
     void compress_INT_fileds(SPackage& pck, vector<uint8_t>& v_compressed, vector<uint8_t>& v_tmp);
+    void increment_block_id(uint32_t &block_id);
     void lock_coder_compressor(SPackage& pck);
     bool check_coder_compressor(SPackage& pck);
     void unlock_coder_compressor(SPackage& pck);
-    void lock_gt_block_process(int &_block_id);
-    bool check_gt_block_process(int &_block_id);
+    void lock_gt_block_process(uint32_t &_block_id);
+    bool check_gt_block_process(uint32_t &_block_id);
     void unlock_gt_block_process();
     void Encoder(vector<uint8_t>& v_data, vector<uint8_t>& v_tmp);
     bool compress_meta(vector<string> v_samples,const string& v_header);

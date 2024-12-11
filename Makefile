@@ -18,7 +18,9 @@ BIN_DIR := bin
 
 # 编译器和编译选项
 CXX := g++
-CXXFLAGS := -Wall -O3 -g -m64 -std=c++14 -pthread -MMD -MP -I $(INC_DIR) -I $(SRC_DIR)
+# CXXFLAGS := -Wall -O3 -g -m64 -std=c++14 -pthread -MMD -MP -I $(INC_DIR) -I $(SRC_DIR)
+CXXFLAGS := -std=c++17 -Wall -O0 -g -m64 -pthread -MMD -MP -I $(INC_DIR) -I $(SRC_DIR)
+
 
 # 平台特定设置
 ifeq ($(uname_S),Linux)

@@ -6,5 +6,6 @@ obj/
 toy/
 src/tmp
 Test_Records/
+logs/
 
 # Build directory.

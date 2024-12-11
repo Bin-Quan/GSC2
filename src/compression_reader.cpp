@@ -2,6 +2,7 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+
 // ***************************************************************************************************************************************
 // ***************************************************************************************************************************************
 bool CompressionReader::OpenForReading(string &file_name)
@@ -164,14 +165,38 @@ bool CompressionReader::setBitVector()
 {
     if (no_samples == 0)
         return false;
-    vec_len = (no_samples * ploidy) / 8 + (((no_samples * ploidy) % 8) ? 1 : 0);
-    block_max_size = vec_len * no_vec_in_block + 1;
+    // vec_len = (no_samples * ploidy) / 8 + (((no_samples * ploidy) % 8) ? 1 : 0);
+    // block_max_size = vec_len * no_vec_in_block + 1;
+    if (no_subblocks)
+    {
+        vec_len = no_bit_per_block / 8 + ((no_bit_per_block % 8) ? 1 : 0);
+        last_vec_len = no_bit_last_block / 8 + ((no_bit_last_block % 8) ? 1 : 0);
+        block_max_size = vec_len * no_vec_in_block + 1;
+        last_block_max_size = last_vec_len * no_vec_in_block + 1;
+    }
+    else
+    {
+        vec_len = (no_samples * ploidy) / 8 + (((no_samples * ploidy) % 8) ? 1 : 0);
+        block_max_size = vec_len * no_vec_in_block + 1;
+    }
+
+    // no_bv_last_block = ((no_samples * ploidy) % no_bit_per_block) / 8 + ((((no_samples * ploidy) % no_bit_per_block) % 8) ? 1 : 0);
+    // vec_len_per_rows = no_bv_last_block + vec_len * (no_subblocks - 1);
+
     // phased_block_max_size = ((no_samples *  (ploidy-1)) / 8 + (((no_samples *  (ploidy-1)) % 8)?1:0))*no_vec_in_block/2;
-    bv.Create(block_max_size);
+    // bv.Create(block_max_size);
+    
+    bv.resize(no_subblocks);
+    for (uint32_t i = 0; i < no_subblocks - 1; ++i) {
+        bv[i].Create(block_max_size);
+    }
+    bv[no_subblocks - 1].Create(last_block_max_size);  // 最后一个末端数据块
 
     vec_read_fixed_fields = 0;
     fixed_fields_id = 0;
-    block_id = 0;
+    // block_id = 0;
+    block_row_id = 0;
+    block_column_id = 0;
     vec_read_in_block = 0;
     return true;
 }
@@ -580,7 +605,7 @@ bool CompressionReader::SetVariantOtherFields(vector<field_desc> &fields)
 #ifdef LOG_INFO
             {
                 uint32_t *pp = (uint32_t *)fields[i].data;
-                for (int j = 0; j < fields[i].data_size; ++j)
+                for (uint32_t j = 0; j < fields[i].data_size; ++j)
                     distinct_values[i].insert(pp[j]);
             }
 #endif
@@ -593,7 +618,7 @@ bool CompressionReader::SetVariantOtherFields(vector<field_desc> &fields)
             {
                 uint32_t *pp = (uint32_t *)fields[i].data;
 
-                for (int j = 0; j < fields[i].data_size; ++j)
+                for (uint32_t j = 0; j < fields[i].data_size; ++j)
                     distinct_values[i].insert(pp[j]);
             }
 #endif
@@ -676,7 +701,7 @@ bool CompressionReader::ProcessInVCF()
             if (tmpi % 100000 == 0)    // 每处理10万条记录时，程序会输出当前处理到的记录数
             {
                 std::cerr << tmpi << "\r";
-                fflush(stdout);
+                // fflush(stdout);
             }
             if (compress_mode == compress_mode_t::lossless_mode)
             {
@@ -881,6 +906,10 @@ void CompressionReader::ProcessFixedVariants(bcf1_t *vcf_record, variant_desc_t 
     }
     cur_pos = desc.pos;
 }
+
+// ***************************************************************************************************************************************
+// 细分子块bv.mem和v_vcf_data_compress数据抽取(直接在原mem上操作最好)
+
 // ***************************************************************************************************************************************
 // 将固定字段和基因型数据码流添加到对应的缓存中，并分块放入Gt_queue队列中
 // 从这里来操作细分块逻辑（按行读取方式不变，推入队列方式采用多线程）
@@ -888,6 +917,21 @@ void CompressionReader::ProcessFixedVariants(bcf1_t *vcf_record, variant_desc_t 
 #include <bitset>
 #include <cstdint>
 using namespace std;
+
+uint8_t CompressionReader::encodeValue(int value) {
+    switch (value) {
+        case 0: return 0b00; // 00 表示 0
+        case 1: return 0b01; // 01 表示 1
+        case 2: return 0b11; // 10 表示 2
+        case -1: return 0b10; // 11 表示 -1
+        default: return 0b00; // 默认返回值，或其他适当的错误编码
+    }
+}
+// 构造 block ID
+uint32_t CompressionReader::encodeBlockID(uint16_t row, uint16_t column)
+{
+    return (static_cast<uint32_t>(row) << 16) | column;
+}
 void CompressionReader::addVariant(int *gt_data, int ngt_data, variant_desc_t &desc)
 {
 
@@ -924,39 +968,33 @@ void CompressionReader::addVariant(int *gt_data, int ngt_data, variant_desc_t &d
         // }
         // printf("\n");
 
-        // 编码第1位
-        for (int i = 0; i < ngt_data; i++)
+//*****************************************************************
+        for (size_t block_index = 0; block_index < no_subblocks; block_index++)
         {
-            if (gt_data[i] == 0 || gt_data[i] == 1)
-            {
-                bv.PutBit(0);   // PutBit 函数逐位将数据放入一个缓冲区 word_buffer，一旦缓冲区填满，它会调用 PutWord 来处理完整的 32 位数据。PutWord 函数负责将 32 位的数据拆分为 4 个字节，并逐个字节写出。
+            // 确定当前块的起始位置和大小
+            uint32_t block_start = block_index * no_bit_per_block;
+            uint32_t block_size = (block_index == no_subblocks - 1) ? no_bit_last_block : no_bit_per_block;
+
+            // 先编码高位
+            for (uint32_t i = 0; i < block_size; i++) {
+                uint8_t encoded = encodeValue(gt_data[block_start + i]); // 获取二进制编码
+                uint8_t high_bit = (encoded & 0b10) >> 1;                // 提取高位
+                bv[block_index].PutBit(high_bit);                       // 编码高位
             }
-            else // if(bcf_gt_is_missing(gt_arr[i]) || bcf_gt_allele(gt_arr[i]) == 2)
-            {
-                bv.PutBit(1);
+            bv[block_index].FlushPartialWordBuffer();                   // 刷新高位缓冲区
+
+            // 再编码低位
+            for (uint32_t i = 0; i < block_size; i++) {
+                uint8_t encoded = encodeValue(gt_data[block_start + i]); // 获取二进制编码
+                uint8_t low_bit = encoded & 0b01;                       // 提取低位
+                bv[block_index].PutBit(low_bit);                        // 编码低位
             }
+            bv[block_index].FlushPartialWordBuffer();                   // 刷新低位缓冲区
         }
 
-        bv.FlushPartialWordBuffer();    // 将部分填充的 word_buffer 进行对齐，并将其中的字节按需输出
-
-        // Set vector with less significant bits of dibits
-        for (int i = 0; i < ngt_data; i++)
-        {
-
-            if (gt_data[i] == 1 || gt_data[i] == 2)
-            {
-                bv.PutBit(1);
-            }
-            else // 0
-            {
-                bv.PutBit(0);
-            }
-        }
-        bv.FlushPartialWordBuffer();
-
-        v_vcf_data_compress.emplace_back(desc);  // variant_desc_t
+        v_vcf_data_compress.emplace_back(desc); // variant_desc_t
         vec_read_fixed_fields++;
-        if (vec_read_fixed_fields == no_fixed_fields)  // 读取的固定字段数量达到指定数量no_fixed_fields，存入actual_variants中
+        if (vec_read_fixed_fields == no_fixed_fields) // 读取的固定字段数量达到指定数量no_fixed_fields，存入actual_variants中
         {
             actual_variants.emplace_back(no_actual_variants);
             no_actual_variants = 0;
@@ -967,26 +1005,77 @@ void CompressionReader::addVariant(int *gt_data, int ngt_data, variant_desc_t &d
         // bv一致循环构造矩阵块，直到达到行数条件
         if (vec_read_in_block == no_vec_in_block) // Insert complete block into queue of blocks
         {
+            for (uint32_t i = 0; i < no_subblocks; ++i)
+            {
+                bv[i].TakeOwnership();
+            }
 
-            bv.TakeOwnership();
-
-            // cout<< "=======达到块数条件=========\n";
-            // for (size_t i = 0; i < 40; ++i) {
-            //     std::cout << "bv.mem_buffer[" << i << "] (in binary) = " << std::bitset<8>(bv.mem_buffer[i]) << std::endl;
+            //**************************************************
+            // std::ofstream file("./toy/bvData/push_sub" + std::to_string(no_bit_per_block/2) + "_data_" + std::to_string(no_subblocks - 1) + ".txt", std::ios::app);
+            // if (!file.is_open())
+            // {
+            //     std::cerr << "无法打开文件 group_data.txt" << std::endl;
+            //     return;  
             // }
+            // // 循环写入每个字节的位表示
+            // for (uint32_t i = 0; i < vec_read_in_block * last_vec_len; ++i)
+            // {
+            //     // 将 mem_buffer[i] 转换为 8 位二进制格式并写入文件
+            //     file << "bv.mem_buffer[" << i << "] (in binary) = "<< std::bitset<8>(bv[no_subblocks - 1].mem_buffer[i]) << "\n";
+            // }
+            // // 关闭文件
+            // file.close();
+            //**************************************************
 
-            Gt_queue->Push(block_id, bv.mem_buffer, vec_read_in_block, v_vcf_data_compress); 
+            std::vector<variant_desc_t> sub_v_vcf_data_compress;
+            sub_v_vcf_data_compress.reserve(no_bit_per_block); // 提前分配内存
+
+            for (size_t i = 0; i < no_subblocks; i++)
+            {
+                // 检查起始范围，防止越界
+                size_t start_idx = i * no_bit_per_block;
+                if (start_idx >= v_vcf_data_compress.size()) {
+                    std::cerr << "subdivided data block error"<< std::endl;
+                    break; // 超过范围直接退出
+                }
+
+                // 计算当前块大小，确保范围合法
+                size_t block_size = (i == no_subblocks - 1) ? no_bit_last_block : no_bit_per_block;
+                size_t end_idx = std::min(start_idx + block_size, v_vcf_data_compress.size());
+
+                // 分配当前块内容
+                auto start = v_vcf_data_compress.begin() + start_idx;
+                auto end = v_vcf_data_compress.begin() + end_idx;
+
+                sub_v_vcf_data_compress.assign(start, end);
+
+                // 推送到队列
+                int block_column_id = i;
+                int block_id = encodeBlockID(block_row_id, block_column_id);
+
+                Gt_queue->Push(block_id, bv[i].mem_buffer, vec_read_in_block, sub_v_vcf_data_compress);
+                // cout<< "<in>数据推入：block_id: "<<block_id<<endl;
+                LOG_INFO("<in>数据推入：block_id=", block_id);
+            }
+            block_row_id++;
+
             v_vcf_data_compress.clear();
             no_chrom_num++;
             no_vec = no_vec + vec_read_in_block;
-            block_id++; // 更新块 ID
-            bv.Close();
-            bv.Create(block_max_size);
+            for (uint32_t i = 0; i < no_subblocks - 1; ++i)
+            {
+                bv[i].Close();
+                bv[i].Create(block_max_size);
+            }
+            bv[no_subblocks - 1].Close();
+            bv[no_subblocks - 1].Create(last_block_max_size);
+            // bv.Close();
+            // bv.Create(block_max_size);
             vec_read_in_block = 0;
         }
         no_chrom = cur_chrom;
     }
-    else    // 当前变体的染色体与前一个染色体不同,防止下一个染色体的数据就会混入到当前染色体的块中
+    else // 当前变体的染色体与前一个染色体不同,防止下一个染色体的数据就会混入到当前染色体的块中
     {
         if (vec_read_fixed_fields)
         {
@@ -1000,44 +1089,76 @@ void CompressionReader::addVariant(int *gt_data, int ngt_data, variant_desc_t &d
         cur_chrom = desc.chrom;
         if (vec_read_in_block)
         {
-            bv.TakeOwnership();
-            Gt_queue->Push(block_id, bv.mem_buffer, vec_read_in_block, v_vcf_data_compress);
+            for (uint32_t i = 0; i < no_subblocks; ++i)
+            {
+                bv[i].TakeOwnership();
+            }
+
+            std::vector<variant_desc_t> sub_v_vcf_data_compress;
+            sub_v_vcf_data_compress.reserve(no_bit_per_block);
+
+            for (size_t i = 0; i < no_subblocks; i++)
+            {
+                // 检查起始范围，防止越界
+                size_t start_idx = i * no_bit_per_block;
+                if (start_idx >= v_vcf_data_compress.size()) {      // 处理边界块
+
+                    int block_column_id = i;
+                    int block_id = encodeBlockID(block_row_id, block_column_id);
+                    sub_v_vcf_data_compress.emplace_back(variant_desc_t());
+                    Gt_queue->Push(block_id, bv[i].mem_buffer, vec_read_in_block, sub_v_vcf_data_compress);
+                    
+                    // std::cerr << "subdivided data block error"<< std::endl;
+                    continue;; // 超过范围直接退出
+                }
+
+                size_t block_size = (i == no_subblocks - 1) ? no_bit_last_block : no_bit_per_block;
+                size_t end_idx = std::min(start_idx + block_size, v_vcf_data_compress.size());
+
+                auto start = v_vcf_data_compress.begin() + start_idx;
+                auto end = v_vcf_data_compress.begin() + end_idx;
+
+                sub_v_vcf_data_compress.assign(start, end);
+
+                int block_column_id = i;
+                int block_id = encodeBlockID(block_row_id, block_column_id);
+
+                Gt_queue->Push(block_id, bv[i].mem_buffer, vec_read_in_block, sub_v_vcf_data_compress);
+            }
+            block_row_id++;
+
             v_vcf_data_compress.clear();
             no_chrom_num++;
             no_vec = no_vec + vec_read_in_block;
-            block_id++;
-            bv.Close();
-            bv.Create(block_max_size);
+            // block_id++;
+            for (uint32_t i = 0; i < no_subblocks - 1; ++i)
+            {
+                bv[i].Close();
+                bv[i].Create(block_max_size);
+            }
+            bv[no_subblocks - 1].Close();
+            bv[no_subblocks - 1].Create(last_block_max_size);
+            // bv.Close();
+            // bv.Create(block_max_size);
             vec_read_in_block = 0;
         }
         for (int i = 0; i < ngt_data; i++)
         {
-
-            if (gt_data[i] == 0 || gt_data[i] == 1)
-            {
-                bv.PutBit(0);
-            }
-            else // if(bcf_gt_is_missing(gt_arr[i]) || bcf_gt_allele(gt_arr[i]) == 2)
-            {
-                bv.PutBit(1);
-            }
+            uint8_t encoded = encodeValue(gt_data[i]);      // 获取二进制编码
+            uint8_t high_bit = (encoded & 0b10) >> 1;  // 提取高位
+            bv[0].PutBit(high_bit);                       // 编码高位
         }
-        bv.FlushPartialWordBuffer();
-        // Set vector with less significant bits of dibits
+        bv[0].FlushPartialWordBuffer();                   // 刷新高位缓冲区
+
         for (int i = 0; i < ngt_data; i++)
         {
-            if (gt_data[i] == 1 || gt_data[i] == 2)
-            {
-                bv.PutBit(1);
-            }
-            else // 0
-            {
-                bv.PutBit(0);
-            }
+            uint8_t encoded = encodeValue(gt_data[i]);      // 获取二进制编码
+            uint8_t low_bit = encoded & 0b01;          // 提取低位
+            bv[0].PutBit(low_bit);                        // 编码低位
         }
-        bv.FlushPartialWordBuffer();
+        bv[0].FlushPartialWordBuffer();                   // 刷新低位缓冲区    
 
-        vec_read_in_block += 2; // Two vectors added
+        vec_read_in_block += 2;
         v_vcf_data_compress.emplace_back(desc);
         where_chrom.emplace_back(make_pair(no_chrom, no_chrom_num));
     }
@@ -1046,46 +1167,52 @@ void CompressionReader::addVariant(int *gt_data, int ngt_data, variant_desc_t &d
 // ***************************************************************************************************************************************
 uint32_t CompressionReader::setNoVecBlock(GSC_Params &params)
 {
-        params.var_in_block = no_samples * params.ploidy;
+    params.var_in_block = no_samples * params.ploidy;
+    no_bit_per_block = params.no_samples_per_block * params.ploidy;
+    no_bit_last_block = params.no_samples_last_block * params.ploidy;
+    no_subblocks = params.no_subblocks;
 
-        int numThreads = std::thread::hardware_concurrency() / 2;
+    int numThreads = std::thread::hardware_concurrency() / 2;
 
-        int numChunks = 1 + (params.var_in_block / 1024);   // 取商而忽略小数部分
+    int numChunks = 1 + (params.var_in_block / 1024); // 取商而忽略小数部分
 
-        if (numChunks < numThreads)
-        {
-            numThreads = numChunks;
-        }
+    if (numChunks < numThreads)
+    {
+        numThreads = numChunks;
+    }
 
-        params.no_gt_threads = numThreads;
-        // params.no_gt_threads = 1;
+    params.no_gt_threads = numThreads;
+    // params.no_gt_threads = 1;
 
-        if (params.var_in_block < 1024)
-        {
-            chunk_size = CHUNK_SIZE1;
-        }
-        else if (params.var_in_block < 4096)
-        {
-            chunk_size = CHUNK_SIZE2;
-        }
-        else if (params.var_in_block < 8192)
-        {
-            chunk_size = CHUNK_SIZE3;
-        }
-        else
-        {
-            chunk_size = params.var_in_block;
-        }
-        params.no_blocks = chunk_size / params.var_in_block;
+    if (params.var_in_block < 1024)
+    {
+        chunk_size = CHUNK_SIZE1;
+    }
+    else if (params.var_in_block < 4096)
+    {
+        chunk_size = CHUNK_SIZE2;
+    }
+    else if (params.var_in_block < 8192)
+    {
+        chunk_size = CHUNK_SIZE3;
+    }
+    else
+    {
+        chunk_size = params.var_in_block;
+    }
+    params.no_blocks = chunk_size / params.var_in_block;
 
-        no_fixed_fields = params.no_blocks * params.var_in_block;
+    no_fixed_fields = params.no_blocks * params.var_in_block;
 
-        if (params.task_mode == task_mode_t::mcompress)
-        {
-            no_vec_in_block = params.var_in_block * 2;      // 单个向量（全零 or 复制）
-            params.vec_len = params.var_in_block / 8 + ((params.var_in_block % 8) ? 1 : 0);  // 矩阵每行占用的字节数
-            params.n_samples = no_samples;
-        }
+    if (params.task_mode == task_mode_t::mcompress)
+    {
+        no_vec_in_block = params.var_in_block * 2;                                      // 单个向量（全零 or 复制）
+        // params.vec_len = params.var_in_block / 8 + ((params.var_in_block % 8) ? 1 : 0); // 矩阵每行占用的字节数
+        params.vec_len = no_bit_per_block / 8 + ((no_bit_per_block % 8) ? 1 : 0);
+        params.last_vec_len = no_bit_last_block / 8 + ((no_bit_last_block % 8) ? 1 : 0);
+        params.n_samples = no_samples;
+    }
+
     return 0;
 }
 void CompressionReader::CloseFiles()
@@ -1099,24 +1226,86 @@ void CompressionReader::CloseFiles()
     }
     if (vec_read_in_block)
     {
+        for (uint32_t i = 0; i < no_subblocks; ++i)
+        {
+            bv[i].TakeOwnership();
+        }
+        const size_t data_size = v_vcf_data_compress.size();
+        std::vector<variant_desc_t> sub_v_vcf_data_compress;
+        sub_v_vcf_data_compress.reserve(no_bit_per_block); // 提前分配内存
 
-        bv.TakeOwnership();
-        // cout<< "=======关闭文件=========\n";
-        // for (size_t i = 0; i < 12; ++i) {                
-        //     std::cout << "bv.mem_buffer[" << i << "] (in binary) = " << std::bitset<8>(bv.mem_buffer[i]) << std::endl;
+        //*****************************************************************
+        // std::ofstream file("./toy/bvData/push_sub" + std::to_string(no_bit_per_block/2) + "_data_" + std::to_string(no_subblocks - 1) + ".txt", std::ios::app);
+        // if (!file.is_open())
+        // {
+        //     std::cerr << "无法打开文件 group_data.txt" << std::endl;
+        //     return;  
         // }
-        // Gt_queue->Push(block_id, bv.mem_buffer, vec_read_in_block,v_vcf_data_compress,chrom_flag::none);
-        Gt_queue->Push(block_id, bv.mem_buffer, vec_read_in_block, v_vcf_data_compress);
-        // v_vcf_data_compress.clear();
+        // // 循环写入每个字节的位表示 vec_leb
+        // for (uint32_t i = 0; i < vec_read_in_block * last_vec_len; ++i)
+        // {
+        //     // 将 mem_buffer[i] 转换为 8 位二进制格式并写入文件
+        //     file << "bv.mem_buffer[" << i << "] (in binary) = "<< std::bitset<8>(bv[no_subblocks - 1].mem_buffer[i]) << "\n";
+        // }
+        // // 关闭文件
+        // file.close();
+        //*****************************************************************
+
+        for (size_t i = 0; i < no_subblocks; i++)
+        {
+            // 检查起始范围，防止越界
+            size_t start_idx = i * no_bit_per_block; 
+
+            if (start_idx >= data_size) {      // 处理边界块
+
+                const int block_column_id = i;
+                const int block_id = encodeBlockID(block_row_id, block_column_id);
+                // 让chrome有值
+                variant_desc_t temp_variant_desc_t;
+                temp_variant_desc_t.chrom = v_vcf_data_compress[0].chrom;
+                sub_v_vcf_data_compress.emplace_back(temp_variant_desc_t);
+                Gt_queue->Push(block_id, bv[i].mem_buffer, vec_read_in_block, sub_v_vcf_data_compress);
+                // cout<< "<in>无fixed_fields的尾部数据推入：block_id: "<<block_id<<endl;
+                LOG_INFO("<in>无fixed_fields的尾部数据推入：block_id=", block_id);
+
+                continue;
+            }
+
+            // 计算当前块大小，确保范围合法
+            const size_t block_size = (i == no_subblocks - 1) ? no_bit_last_block : no_bit_per_block;
+            const size_t end_idx = std::min(start_idx + block_size, data_size);
+
+            sub_v_vcf_data_compress.clear();
+            sub_v_vcf_data_compress.assign(
+                v_vcf_data_compress.begin() + start_idx,
+                v_vcf_data_compress.begin() + end_idx
+            );
+
+            // 推送到队列
+            int block_column_id = i;
+            int block_id = encodeBlockID(block_row_id, block_column_id);
+            Gt_queue->Push(block_id, bv[i].mem_buffer, vec_read_in_block, sub_v_vcf_data_compress);
+            // cout<< "<in>尾部数据推入：block_id: "<<block_id<<endl;
+            LOG_INFO("<in>尾部数据推入：block_id=", block_id);
+        }
+        block_row_id++;
+
+        v_vcf_data_compress.clear();
         no_chrom_num++;
-        block_id++;
         no_vec = no_vec + vec_read_in_block;
         vec_read_in_block = 0;
-        bv.Close();
+        for (uint32_t i = 0; i < no_subblocks; ++i)
+        {
+            bv[i].Close();
+        }
+        // bv.Close();
     }
 
     v_vcf_data_compress.emplace_back(variant_desc_t());
+    int block_id = encodeBlockID(block_row_id, 0);
     Gt_queue->Push(block_id, nullptr, 0, v_vcf_data_compress);
+    // cout<< "<in>空块数据推入：block_id: "<<block_id<<endl;
+    LOG_INFO("<in>空块数据推入：block_id=", block_id);
 
     block_id = 0;
     Gt_queue->Complete();

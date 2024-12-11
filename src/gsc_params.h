@@ -52,8 +52,10 @@ struct GSC_Params
     uint32_t var_in_block;
     uint32_t ploidy;
     uint64_t vec_len;
+    uint64_t last_vec_len;
     uint32_t records_to_process;
     uint32_t n_samples;
+
 
     char compression_level, mode;
     bool MB_memory;
@@ -75,7 +77,9 @@ struct GSC_Params
     std::string out_id;
 
     bool subblocking_operation;  //是否需要划分子块
-    uint32_t samples_per_block; // 定义块大小
+    uint32_t no_samples_per_block; // 定义块大小
+    uint32_t no_samples_last_block;
+    uint32_t no_subblocks;
 
     GSC_Params()
     {
@@ -118,6 +122,6 @@ struct GSC_Params
         maxAF = 1;
 
         subblocking_operation = true;
-        samples_per_block = 500;  //默认块大小2000，末端数据块大小不确定
+        no_samples_per_block = 2504;  //块的样本数设置
     }
 };

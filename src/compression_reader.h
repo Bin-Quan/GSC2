@@ -16,6 +16,9 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <stack>
+
+#include "LoggerUtil.h"
+
 class CompressionReader {
 
     
@@ -43,6 +46,15 @@ class CompressionReader {
     int ncur_g_data;
     int *gt_data = nullptr;
 
+    // 细分块
+    uint32_t no_bit_per_block;   // 单个块的比特数
+    uint32_t no_subblocks;  // 子块数
+    uint32_t no_bv_last_block;  // 最后一个块的比特向量数
+    uint32_t vec_len_per_rows;  // 每行的比特向量数
+    uint32_t no_bit_last_block;  // 最后一个块的比特数
+    uint64_t last_vec_len;  // 最后一个块的比特向量数
+    int64_t last_block_max_size;  // 最后一个块的最大大小
+
     // 作为局部变量，降低声明周期
     // std::vector<int> gt_data;
     // std::vector<std::vector<int>> gt_data_block;  // 丢弃gt_data指针，存储临时GT块
@@ -52,10 +64,12 @@ class CompressionReader {
     int32_t tmpi;
     size_t chunk_size;  
 
-    CBitMemory bv;
+    vector<CBitMemory> bv;
+    // CBitMemory bv;
     fixed_field_block fixed_field_block_buf;
     int64_t block_max_size;
     uint32_t no_vec_in_block, vec_read_in_block, block_id;
+    uint16_t block_row_id, block_column_id;
     uint32_t no_fixed_fields,vec_read_fixed_fields,fixed_fields_id;
     GtBlockQueue * Gt_queue = nullptr;
     VarBlockQueue<fixed_field_block>* Var_queue = nullptr;
@@ -172,11 +186,17 @@ public:
     }
     uint64_t getNoVec()
     {
-        return no_vec;
+        return no_vec*no_subblocks;      // 返回分块后的总向量数，乘以块数
     }
+
+    uint8_t encodeValue(int value);
+    uint32_t encodeBlockID(uint16_t row, uint16_t column);
+    // uint16_t decodeRow(uint32_t value);
+    // uint16_t decodeColumn(uint32_t value);
 
     bool OpenForReading(string & file_name);
     uint32_t GetSamples(vector<string> &s_list);
+    // bool GetsubBlockParams(uint32_t& _no_samples_per_block, uint32_t& _no_samples_last_block, uint32_t& _no_subblocks);
     bool GetHeader(string &v_header);
     void InitVarinats(File_Handle_2 *_file_handle2);
 	bool ProcessInVCF();

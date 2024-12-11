@@ -10,7 +10,7 @@ bool Compressor::writeCompressFlie()
     // cout << "Gt_index_original_size:" << toal_all_size<< endl;
 
     uint32_t curr_no_blocks = 0;
-    uint32_t where_chrom_size = static_cast<uint32_t>(where_chrom.size());
+    uint32_t where_chrom_size = static_cast<uint32_t>(where_chrom.size());  // where_chrom中块的个数是否要乘以子块数？
     uint32_t chunks_streams_size = static_cast<uint32_t>(chunks_streams.size());
     fwrite(&chunks_streams_size, sizeof(uint32_t), 1, comp);
 
@@ -19,24 +19,31 @@ bool Compressor::writeCompressFlie()
         fwrite(&cur_chunk.second.cur_chunk_actual_pos, sizeof(uint32_t), 1, comp);
         fwrite(&cur_chunk.second.offset, sizeof(size_t), 1, comp);
     }
+
+    // ====参数信息写入====
     fwrite(&params.ploidy, sizeof(uint8_t), 1, comp);
-
     fwrite(&params.vec_len, sizeof(params.vec_len), 1, comp);
-
-    fwrite(&no_vec, sizeof(no_vec), 1, comp);
-
+    fwrite(&params.last_vec_len, sizeof(params.last_vec_len), 1, comp); // 添加最后一列的变量长度
+    fwrite(&no_vec, sizeof(no_vec), 1, comp);   // 已经乘以子块数
     fwrite(&copy_no, sizeof(copy_no), 1, comp);
-    fwrite(&used_bits_cp, sizeof(char), 1, comp);
+    // 写入位图压缩相关的信息     
+    fwrite(&used_bits_cp, sizeof(char), 1, comp);   // 编码原始向量位置所需要的位数
+    //（id of copied vector (where is original)）
     fwrite(&bm_comp_copy_orgl_id.mem_buffer_pos, sizeof(int32_t), 1, comp);
     fwrite(bm_comp_copy_orgl_id.mem_buffer, 1, bm_comp_copy_orgl_id.mem_buffer_pos, comp);
+    
     // fwrite(&no_blocks, sizeof(no_blocks), 1, comp);
     // fwrite(&params.max_no_vec_in_block, sizeof(params.max_no_vec_in_block), 1, comp);
+    
+    // ====写入样本数量====
     fwrite(&params.n_samples, sizeof(params.n_samples), 1, comp);
 
+    // ====写入chunk块的最小pos位置====
     uint32_t chunks_min_pos_size = static_cast<uint32_t>(chunks_min_pos.size());
     fwrite(&chunks_min_pos_size,sizeof(uint32_t) , 1, comp);
     fwrite(&chunks_min_pos[0], sizeof(int64_t), chunks_min_pos_size, comp);
 
+    // ====写入染色体映射信息====
     fwrite(&where_chrom_size, sizeof(uint32_t), 1, comp);
     // fwrite(&all_indexes_pos[0], all_indexes_pos.size() * sizeof(uint64_t), 1, comp);
     for (const auto &elem : where_chrom)
@@ -46,7 +53,9 @@ bool Compressor::writeCompressFlie()
         fwrite(elem.first.data(), sizeof(char), chrom_size, comp);
         fwrite(&elem.second, sizeof(int), 1, comp);
     }
-    uint32_t vint_last_perm_size = static_cast<uint32_t>(vint_last_perm.size());
+
+    // ====写入无法隐式存储的顺序向量信息====
+    uint32_t vint_last_perm_size = static_cast<uint32_t>(vint_last_perm.size());        // vint_last_perm处理问题
     fwrite(&vint_last_perm_size, sizeof(uint32_t), 1, comp);
     for (const auto &data : vint_last_perm)
     {
@@ -57,21 +66,21 @@ bool Compressor::writeCompressFlie()
         fwrite(data.second.data(), sizeof(uint8_t), data_size, comp);
     }
 
-    bm_comp_copy_orgl_id.Close();
+    //====关闭位图文件并写入压缩的头部和样本信息====
+    bm_comp_copy_orgl_id.Close();   // 作用弄清
     Meta_comp_size += comp_v_header.size();
     uint32_t  comp_size = static_cast<uint32_t>(comp_v_header.size());
     fwrite(&comp_size, sizeof(uint32_t), 1, comp);
     fwrite(comp_v_header.data(), 1, comp_v_header.size(), comp);
-
     Meta_comp_size += comp_v_samples.size();
     comp_size = static_cast<uint32_t>(comp_v_samples.size());
     fwrite(&comp_size, sizeof(uint32_t), 1, comp);
     fwrite(comp_v_samples.data(), 1, comp_v_samples.size(), comp);
     
-    // 从temp_file中逐块读取数据，并写入到comp文件（想象快递搬运的过程）
+    // 从temp_file（Part1:固定字段和基因型字段）中逐块读取数据
     uint64_t size;
     uint8_t *temp_buffer = NULL;
-    while (fread(&size, sizeof(size), 1, temp_file) == 1) { 
+    while (fread(&size, sizeof(size), 1, temp_file) == 1) {     // temp_file：fixed_field_block_io
         chunks_streams[curr_no_blocks+1].offset = ftell(comp);
         
         temp_buffer = (uint8_t*)realloc(temp_buffer, size);
@@ -145,6 +154,8 @@ bool Compressor::writeCompressFlie()
     // std::cerr << "ALT_comp_size:     " << ALT_comp_size <<"\tByte"<< endl;
     // std::cerr << "QUAL_comp_size:    " << QUAL_comp_size <<"\tByte"<< endl;
     // cout << "GT_index_comp_size:      " << GT_comp_size <<"\tByte"<< endl;
+
+
     free(temp_buffer);
     fclose(temp_file);
     if (remove(temp_file1_fname) != 0) {
@@ -152,8 +163,9 @@ bool Compressor::writeCompressFlie()
         return EXIT_FAILURE;
     }
     // remove(temp_file1_fname);
-    other_fields_offset = ftell(comp);
 
+    // ====处理并写入其他字段数据====
+    other_fields_offset = ftell(comp);
 	FILE *other_f = fopen(temp_file2_fname.c_str(),"rb"); 
     
     if (other_f) {
@@ -177,13 +189,16 @@ bool Compressor::writeCompressFlie()
     sdsl_offset = ftell(comp);
     
     // sdsl_offset = end_offset;
-    fseek(comp, 0, SEEK_SET);
+    fseek(comp, 0, SEEK_SET);   // 将文件指针移动到文件开头
+
+    //====写入mode_type、other_fields_offset、sdsl_offset，更新文件头部的偏移量信息====
     fwrite(&mode_type, sizeof(mode_type), 1, comp);
     fwrite(&other_fields_offset, sizeof(other_fields_offset), 1, comp);
     fwrite(&sdsl_offset, sizeof(sdsl_offset), 1, comp);
-    std::cerr<<int(mode_type) <<" " << other_fields_offset <<" " << sdsl_offset <<endl;
-    fseek(comp, 21, SEEK_SET);
-    // 这里是否重复写入了？
+    std::cerr<<int(mode_type) <<" " << other_fields_offset <<" " << sdsl_offset <<endl;  // 输出其他字段数据、SDSL 位向量数据在文件中的偏移量
+    
+    // 更新 chunks_streams 中每个块的实际位置和偏移量
+    fseek(comp, 21, SEEK_SET);      // 将文件指针移动到位置 21（假设文件头部固定占用 21 字节）
     for(auto cur_chunk:chunks_streams)
     {
         fwrite(&cur_chunk.second.cur_chunk_actual_pos, sizeof(uint32_t), 1, comp);
@@ -196,6 +211,8 @@ bool Compressor::writeCompressFlie()
         fclose(comp);
         comp = nullptr;
     }
+
+    // ====写入 SDSL 位向量数据====
     if (is_stdout) {
      
         for (int v = 0; v < 2; v++) {
@@ -364,6 +381,16 @@ bool Compressor::OpenTempFile(const string &out_file_name)
     return true;
 }
 
+// 解码：解析出行
+uint16_t decodeRow(uint32_t blockID) {
+    return static_cast<uint16_t>(blockID >> 16);
+}
+
+// 解码：解析出列
+uint16_t decodeColumn(uint32_t blockID) {
+    return static_cast<uint16_t>(blockID & 0xFFFF);
+}
+
 #include <iostream>
 #include <bitset>
 #include <cstdint>
@@ -398,8 +425,9 @@ bool Compressor::CompressProcess()
     compression_reader->GetHeader(header);
     
     uint32_t no_samples = compression_reader->GetSamples(v_samples);   // 获取样本编号和样本数
-    // for(int i =0;i<v_samples.size();i++)
-    //     std::cerr<<v_samples[i]<<endl;
+    params.no_samples_last_block = (no_samples % params.no_samples_per_block) ? (no_samples % params.no_samples_per_block) : params.no_samples_per_block;
+    params.no_subblocks  = no_samples / params.no_samples_per_block + ((no_samples % params.no_samples_per_block) ? 1 : 0);
+
     std::cerr << "The VCF file contains a total of samples: " << no_samples << endl;
 
     if (!no_samples)
@@ -448,7 +476,7 @@ bool Compressor::CompressProcess()
                     
 			        if (!part_queue.Pop<SPackage>(pck, fo))
 				        break;
-                    cout<< "数据弹出：pck_id: "<<pck.key_id<<endl;
+                    // cout<< "><数据弹出：pck_id: "<<pck.key_id<<endl;
                     compress_other_fileds(pck, v_compressed, v_tmp);
                 
 		        }      
@@ -461,7 +489,7 @@ bool Compressor::CompressProcess()
     GtBlockQueue inGtBlockQueue(max((int)(params.no_blocks*params.no_gt_threads),8));
     VarBlockQueue<fixed_field_block>  sortVarBlockQueue(max((int)params.no_threads * 2, 8));
     compression_reader->setQueue(&inGtBlockQueue);   // 从这里初始化inGtBlockQueue（push构造）
-    block_size = no_samples * params.ploidy * 2;
+    // block_size = no_samples * params.ploidy * 2;
     
     // P-C Model下，各个线程都得等待数据推入
     unique_ptr<thread> compress_thread(new thread([&] {
@@ -484,32 +512,61 @@ bool Compressor::CompressProcess()
     string prev_chrom = "";
     int chunk_id = 0;
 
+//*******************************************************************************************************************
+
     for(uint32_t i = 0; i < params.no_gt_threads; ++i)
         block_process_thread.emplace_back(thread([&]() {
-            
-            int block_id = 0;
+
+            uint32_t block_id = 0;
             unsigned long num_rows;
             unsigned char *data = nullptr;
             vector<variant_desc_t> v_vcf_data_io;             
             vector<uint32_t> origin_of_copy;
             origin_of_copy.reserve(no_variants_in_buf);
             vector<uint8_t> samples_indexes;   //Index of the location where the block storing 1 is stored.
-            vector<uint32_t> perm;
-            perm.clear();
-            perm.resize(no_samples * params.ploidy, 0);
-            for (size_t i_p = 0; i_p < perm.size(); i_p++)
-                perm[i_p] = i_p;
+            vector<uint32_t> perm(max(
+                params.no_samples_per_block * params.ploidy,
+                params.no_samples_last_block * params.ploidy
+            ));
             BlockProcess block_process(params);
-                                    
+
             while (true)
             {
+
                 if (!inGtBlockQueue.Pop(block_id, data, num_rows, v_vcf_data_io)){
                     break;
                 }
-                cout<< "数据弹出：block_id: "<<block_id<<endl;
-                // for (size_t i = 0; i < 40; ++i) {
-                //     std::cout << "data[" << i << "] (in binary) = " << std::bitset<8>(data[i]) << std::endl;
+                // *****************************************************
+                // if(static_cast<uint16_t>(block_id & 0xFFFF) == (params.no_subblocks - 1)){
+                //     std::ofstream file("./toy/bvData/pop_sub" + std::to_string(params.no_samples_per_block) + "_data_" + std::to_string(params.no_subblocks - 1) + ".txt", std::ios::app);
+                //     if (!file.is_open())
+                //     {
+                //         std::cerr << "无法打开文件 group_data.txt" << std::endl;
+                //         return;  
+                //     }
+                //     for (uint32_t i = 0; i < num_rows * params.last_vec_len; ++i)
+                //     {
+                //         // 将 mem_buffer[i] 转换为 8 位二进制格式并写入文件
+                //         file << "data[" << i << "] (in binary) = "<< std::bitset<8>(data[i]) << "\n";
+                //     }
+                //     // 关闭文件
+                //     file.close();
                 // }
+                // *****************************************************
+                uint32_t no_columns = v_vcf_data_io.size();
+                // cout<< "<out>数据弹出：block_id: "<<block_id<<endl;
+                LOG_INFO("<out>数据弹出：block_id=", block_id);
+                
+                if(static_cast<uint16_t>(block_id & 0xFFFF) == (params.no_subblocks - 1)){  // 判断是否是最后一个子块
+                    block_size = params.no_samples_last_block * params.ploidy;
+                    perm.resize(params.no_samples_last_block * params.ploidy);
+                }
+                else{
+                    block_size = params.no_samples_per_block * params.ploidy;
+                    perm.resize(params.no_samples_per_block * params.ploidy);
+                }
+                std::iota(perm.begin(), perm.end(), 0);
+
                 vector<bool> zeros_only(num_rows, false);
                 vector<bool> copies(num_rows, false);                           
                 block_process.SetCurBlock(num_rows, data);
@@ -521,8 +578,7 @@ bool Compressor::CompressProcess()
                     // else
                     //     block_process.ProcessLastBlock(zeros_only, copies, origin_of_copy,samples_indexes);
 
-                    if(num_rows == block_size)
-
+                    if(no_columns == block_size)            
                         block_process.ProcessVariant(perm , v_vcf_data_io);
 
                 }
@@ -557,11 +613,17 @@ bool Compressor::CompressProcess()
                         }
                         if(num_rows){
 
-                            cur_chunk_actual_pos += (uint32_t)v_vcf_data_io.size();
+                            cur_chunk_actual_pos += no_columns;
                             block_process.addSortFieldBlock(fixed_field_block_io,all_zeros,all_copies,comp_pos_copy,zeros_only, copies, origin_of_copy,samples_indexes,v_vcf_data_io,prev_pos);
                             no_curr_chrom_block++;
-                            if(num_rows % block_size){
-                                vint_last_perm.emplace(chunk_id,vint_code::EncodeArray(perm));
+                            if(no_columns % block_size){
+                                    auto encoded_perm = vint_code::EncodeArray(perm);
+                                    auto& perm_vector = vint_last_perm[chunk_id];
+                                    perm_vector.reserve(perm_vector.size() + encoded_perm.size());
+                                    perm_vector.insert(perm_vector.end(),
+                                                    std::make_move_iterator(encoded_perm.begin()),
+                                                    std::make_move_iterator(encoded_perm.end()));
+                                // vint_last_perm.emplace(chunk_id,vint_code::EncodeArray(perm));  // 多线程怎么利用
                             }
 
                             if(no_curr_chrom_block == params.no_blocks){
@@ -583,16 +645,25 @@ bool Compressor::CompressProcess()
                             
                     }
                     else{
-
-                        cur_chunk_actual_pos += (uint32_t)v_vcf_data_io.size();
+                        // 最后末尾块（一个或多个）不包含v_vcf_data_io的情况的处理逻辑
+                        if (v_vcf_data_io[0].pos != 0) 
+                        {
+                            cur_chunk_actual_pos += no_columns;
+                        }
                         block_process.addSortFieldBlock(fixed_field_block_io,all_zeros,all_copies,comp_pos_copy,zeros_only, copies, origin_of_copy,samples_indexes,v_vcf_data_io,prev_pos);
-                        no_curr_chrom_block++;
+                        no_curr_chrom_block++; 
 
-                        if(num_rows % block_size){
-                            vint_last_perm.emplace(chunk_id,vint_code::EncodeArray(perm));
+                        if(no_columns % block_size){
+                            auto encoded_perm = vint_code::EncodeArray(perm);
+                            auto& perm_vector = vint_last_perm[chunk_id];
+                            perm_vector.reserve(perm_vector.size() + encoded_perm.size());
+                            perm_vector.insert(perm_vector.end(),
+                                            std::make_move_iterator(encoded_perm.begin()),
+                                            std::make_move_iterator(encoded_perm.end()));
+                            // vint_last_perm.emplace(chunk_id,vint_code::EncodeArray(perm));
                         }
 
-                        if(no_curr_chrom_block == params.no_blocks){
+                        if(no_curr_chrom_block == params.no_blocks){   
                             sortVarBlockQueue.Push(chunk_id,fixed_field_block_io);
                             // compressFixedFields(fixed_field_block_io);
                             toal_all_size += fixed_field_block_io.gt_block.size();
@@ -634,7 +705,7 @@ bool Compressor::CompressProcess()
         auto stream_id = file_handle2->RegisterStream("part2_params");
         vector<uint8_t> v_desc;
         vector<uint32_t> actual_variants = compression_reader->GetActualVariants();
-        compression_reader->UpdateKeys(keys);  // 作用何在？
+        compression_reader->UpdateKeys(keys);
         append(v_desc, static_cast<uint32_t>(actual_variants.size()));
         
         for (uint32_t i = 0; i < actual_variants.size(); ++i)
@@ -1041,27 +1112,113 @@ void Compressor::InitCompressParams(){
 
  
 }
-void Compressor::lock_gt_block_process(int &_block_id)
+// ************************************************************************************
+void Compressor::increment_block_id(uint32_t &block_id)
 {
+    uint16_t max_col =  static_cast<uint16_t>(params.no_subblocks);
+
+    uint16_t row = block_id >> 16;
+    uint16_t col = block_id & 0xFFFF;
+
+    if (col < max_col - 1)
+    {
+        ++col;
+    }
+    else
+    {
+        col = 0;
+        ++row;
+    }
+
+    block_id = ((uint32_t)row << 16) | col;
+}
+void Compressor::lock_gt_block_process(uint32_t &_block_id)
+{
+    // 解码出 block_id 的行和列
+    uint16_t block_row = decodeRow(_block_id);
+    uint16_t block_column = decodeColumn(_block_id);
+    // std::cout << "Locking block: Row " << block_row << ", Column " << block_column << std::endl;
+    LOG_INFO("Locking block: Row ", block_row, ", Column ", block_column);
+
 	unique_lock<mutex> lck(mtx_gt_block);
 	cv_gt_block.wait(lck, [&, this] {return cur_block_id == _block_id;});
 }
-
-// ************************************************************************************
-bool Compressor::check_gt_block_process(int &_block_id)
+bool Compressor::check_gt_block_process(uint32_t &_block_id)
 {
 	unique_lock<mutex> lck(mtx_gt_block);
 
-	return (int) cur_block_id == _block_id;
+	return (uint32_t) cur_block_id == _block_id;
 }
-
-// ************************************************************************************
 void Compressor::unlock_gt_block_process()
 {
+    // 解码出 cur_block_id 的行和列
+    uint16_t cur_row = decodeRow(cur_block_id);
+    uint16_t cur_column = decodeColumn(cur_block_id);
+    // std::cout << "Unlocking block: Row " << cur_row << ", Column " << cur_column << std::endl;
+    LOG_INFO("Unlocking block: Row ", cur_row, ", Column ", cur_column);
+    
 	lock_guard<mutex> lck(mtx_gt_block);
-    ++cur_block_id;
+    // ++cur_block_id;
+    increment_block_id(cur_block_id);
 	cv_gt_block.notify_all();
 }
+// ************************************************************************************
+// void Compressor::lock_gt_block_process(uint32_t &_block_id)
+// {
+//     // 解码出 block_id 的行和列
+//     uint16_t block_row = decodeRow(_block_id);
+//     uint16_t block_column = decodeColumn(_block_id);
+
+//     // 输出调试信息（可选）
+//     std::cout << "Locking block: Row " << block_row << ", Column " << block_column << std::endl;
+
+//     // 锁定操作
+//     unique_lock<mutex> lck(mtx_gt_block);
+
+//     // 等待直到 cur_block_id 与目标 block_id 匹配
+//     cv_gt_block.wait(lck, [&, this] {
+//         // 获取 cur_block_id 的行和列
+//         uint16_t cur_row = decodeRow(cur_block_id);
+//         uint16_t cur_column = decodeColumn(cur_block_id);
+
+//         // 比较行和列
+//         return (cur_row == block_row) && (cur_column == block_column);
+//     });
+// }
+// bool Compressor::check_gt_block_process(uint32_t &_block_id)
+// {
+//     // 解码出 block_id 的行和列
+//     uint16_t block_row = decodeRow(_block_id);
+//     uint16_t block_column = decodeColumn(_block_id);
+
+//     // 获取 cur_block_id 的行和列
+//     uint16_t cur_row = decodeRow(cur_block_id);
+//     uint16_t cur_column = decodeColumn(cur_block_id);
+
+//     // 比较行和列
+//     return (cur_row == block_row) && (cur_column == block_column);
+// }
+// void Compressor::unlock_gt_block_process()
+// {
+//     // 解码出 cur_block_id 的行和列
+//     uint16_t cur_row = decodeRow(cur_block_id);
+//     uint16_t cur_column = decodeColumn(cur_block_id);
+
+//     // 输出调试信息（可选）
+//     std::cout << "Unlocking block: Row " << cur_row << ", Column " << cur_column << std::endl;
+
+//     // 更新 block_id 的列部分
+//     uint32_t next_block_id = (cur_row << 16) | (decodeColumn(cur_block_id) + 1);
+
+//     // 锁定并更新 cur_block_id，保证块的列递增
+//     lock_guard<mutex> lck(mtx_gt_block);
+//     cur_block_id = next_block_id;
+
+//     // 通知所有线程
+//     cv_gt_block.notify_all();
+// }
+// ************************************************************************************
+
 bool Compressor::compressFixedFields(fixed_field_block &fixed_field_block_io){
 
     fixed_field_block_compress.no_variants = fixed_field_block_io.no_variants;

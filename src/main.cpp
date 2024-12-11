@@ -188,9 +188,19 @@ std::cerr << "Usage of gsc decompress and query:\n\n"
     exit(0);
 }
 //Main program entry
+#include "Logger.h"
 int main(int argc, const char *argv[])
 {
-    
+    // ***********************************************
+    // 初始化日志系统
+    if (!Logger::getInstance().init("./logs/vcf.log", Logger::Level::INFO)) {
+        std::cerr << "Failed to initialize logger" << std::endl;
+        return 1;
+    }
+    // system("/usr/bin/time -v ./bin/gsc");
+    LOG_INFO("***************************开始日志记录**************************");
+    // ***********************************************
+
     high_resolution_clock::time_point start = high_resolution_clock::now();
 
     int result = 0;
@@ -215,6 +225,7 @@ int main(int argc, const char *argv[])
 	duration<double> time_duration = duration_cast<duration<double>>(end - start);
 
 	std::cerr << "Total processing time: " << time_duration.count() << " seconds.\n";
+    LOG_INFO("***************************结束日志记录**************************"); 
 
     return result;
 }
@@ -617,7 +628,7 @@ int params_options(int argc, const char *argv[]){
             else if (strcmp(argv[i], "--split-blocks") == 0 || strcmp(argv[i], "-B") == 0)
             {
                 params.subblocking_operation = true;
-                params.samples_per_block = atoi(argv[i]);
+                params.no_samples_per_block = atoi(argv[i]);
             }   // 还未更新Readme和Usage
     
         }
@@ -633,7 +644,7 @@ int params_options(int argc, const char *argv[]){
 
         }        
         
-    } 
+    }
     return 1;  
 }
  //**********************************************************************************************************************************
